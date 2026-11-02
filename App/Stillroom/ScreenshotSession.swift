@@ -37,18 +37,21 @@ enum ScreenshotSession {
         prepareWindow()
         capture("all-photos")
         scrollSidebar(toEnd: true)
-        await settle(0.4)
+        await settle(0.5)
         capture("sidebar")
         scrollSidebar(toEnd: false)
+        await settle(0.4)
 
         model.inspectorVisible = false
         model.selectPeople()
         model.highlightedSubjectID = model.subjectClusters.first { !$0.name.isEmpty }?.id ?? model.subjectClusters.first?.id
         await model.waitUntilSettled()
-        await settle(1.2)
+        scrollSidebar(toEnd: false)
+        await settle(0.8)
         prepareWindow()
         capture("people")
 
+        scrollSidebar(toEnd: false)
         model.selectAll()
         await model.waitUntilSettled()
         await settle(0.8)
@@ -141,15 +144,21 @@ enum ScreenshotSession {
         guard let content = (NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible })?.contentView else { return }
         func walk(_ view: NSView) {
             if let scroll = view as? NSScrollView,
-               scroll.frame.width < 380,
+               scroll.frame.width < 420,
                scroll.frame.height > 180,
                let document = scroll.documentView {
-                let visible = scroll.contentView.bounds.height
-                let documentHeight = document.bounds.height
-                let maxOffset = max(0, documentHeight - visible)
-                let y = scroll.contentView.isFlipped ? (toEnd ? maxOffset : 0) : (toEnd ? 0 : maxOffset)
-                scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
-                scroll.reflectScrolledClipView(scroll.contentView)
+                let clip = scroll.contentView
+                let maxOffset = max(0, document.bounds.height - clip.bounds.height)
+                let y: CGFloat
+                if clip.isFlipped {
+                    y = toEnd ? maxOffset : 0
+                } else {
+                    y = toEnd ? 0 : maxOffset
+                }
+                clip.scrollToPoint(NSPoint(x: 0, y: y))
+                scroll.reflectScrolledClipView(clip)
+                let anchorY = toEnd ? document.bounds.maxY - 1 : document.bounds.minY
+                document.scrollToVisible(NSRect(x: 0, y: anchorY, width: 1, height: 1))
             }
             view.subviews.forEach(walk)
         }
