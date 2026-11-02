@@ -165,6 +165,7 @@ public struct EncodeAvailability: Equatable, Sendable {
 /// Which still formats ImageIO can write.
 ///
 /// WebP has been readable since macOS 11, and ImageIO still does not advertise a WebP writer.
+/// Stillroom writes WebP with libwebp instead; `ImageEncodeProbe` reports that separately.
 /// AVIF writing arrived in macOS 26. When `destinationTypes` is provided it wins, so a system
 /// that lists the UTI is offered the format even if this table is older than that system.
 public enum ImageEncodeTable {

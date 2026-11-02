@@ -1,0 +1,17 @@
+name: macOS
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode
+        run: xcodebuild -version
+      - name: Test PhotoIndex
+        run: swift test
+      - name: Build Stillroom
+        run: xcodebuild -project Stillroom.xcodeproj -scheme Stillroom -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build

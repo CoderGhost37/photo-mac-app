@@ -103,13 +103,17 @@ public final class IndexDatabase: Sendable {
         guard !inserted.isEmpty || !updated.isEmpty || !deletedIDs.isEmpty else { return }
         try db.write { database in
             for var asset in inserted + updated {
-                if asset.geocodedPlace?.isEmpty != false,
-                   let existing = try Asset.fetchOne(database, sql: "SELECT * FROM asset WHERE id = ?", arguments: [asset.id]),
-                   existing.latitude == asset.latitude,
-                   existing.longitude == asset.longitude,
-                   let kept = existing.geocodedPlace,
-                   !kept.isEmpty {
-                    asset.geocodedPlace = kept
+                if let existing = try Asset.fetchOne(database, sql: "SELECT * FROM asset WHERE id = ?", arguments: [asset.id]) {
+                    if asset.geocodedPlace?.isEmpty != false,
+                       existing.latitude == asset.latitude,
+                       existing.longitude == asset.longitude,
+                       let kept = existing.geocodedPlace,
+                       !kept.isEmpty {
+                        asset.geocodedPlace = kept
+                    }
+                    if existing.isHidden {
+                        asset.isHidden = true
+                    }
                 }
                 try asset.save(database)
                 try upsertKeyword(database, asset: asset)
@@ -191,8 +195,10 @@ public final class IndexDatabase: Sendable {
             SELECT COUNT(*) FROM asset
             WHERE sourceID IN (\(placeholders))
               AND mediaKind = COALESCE(?, mediaKind)
+              AND isHidden = ?
             """
-            let arguments = StatementArguments(query.sourceIDs) + StatementArguments([query.mediaKind?.rawValue])
+            let arguments = StatementArguments(query.sourceIDs)
+                + StatementArguments([query.mediaKind?.rawValue, query.visibility == .hidden ? 1 : 0])
             return try Int.fetchOne(database, sql: sql, arguments: arguments) ?? 0
         }
     }
@@ -200,7 +206,10 @@ public final class IndexDatabase: Sendable {
     /// `bySource` counts every indexed source. Kind totals and `enabledTotal` include only `enabledSourceIDs`.
     public func libraryCounts(enabledSourceIDs: [String]) throws -> LibraryCounts {
         try db.read { database in
-            let sourceRows = try Row.fetchAll(database, sql: "SELECT sourceID, COUNT(*) AS n FROM asset GROUP BY sourceID")
+            let sourceRows = try Row.fetchAll(
+                database,
+                sql: "SELECT sourceID, COUNT(*) AS n FROM asset WHERE isHidden = 0 GROUP BY sourceID"
+            )
             var bySource: [String: Int] = [:]
             for row in sourceRows {
                 if let id: String = row["sourceID"], let count: Int = row["n"] {
@@ -216,6 +225,7 @@ public final class IndexDatabase: Sendable {
                     sql: """
                     SELECT mediaKind, COUNT(*) AS n FROM asset
                     WHERE sourceID IN (\(placeholders))
+                      AND isHidden = 0
                     GROUP BY mediaKind
                     """,
                     arguments: StatementArguments(enabledSourceIDs)
@@ -227,7 +237,73 @@ public final class IndexDatabase: Sendable {
                     }
                 }
             }
-            return LibraryCounts(bySource: bySource, byMediaKind: byKind, enabledTotal: enabledTotal)
+            let hiddenCount = try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM asset WHERE isHidden = 1") ?? 0
+            return LibraryCounts(bySource: bySource, byMediaKind: byKind, enabledTotal: enabledTotal, hiddenCount: hiddenCount)
+        }
+    }
+
+    /// Sets the index flag only. The file on disk is not opened for writing.
+    public func setHidden(_ hidden: Bool, assetIDs: [String]) throws {
+        guard !assetIDs.isEmpty else { return }
+        try db.write { database in
+            let chunk = 200
+            var index = 0
+            while index < assetIDs.count {
+                let end = min(index + chunk, assetIDs.count)
+                let slice = Array(assetIDs[index..<end])
+                let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+                var arguments = StatementArguments([hidden])
+                arguments += StatementArguments(slice)
+                try database.execute(
+                    sql: "UPDATE asset SET isHidden = ? WHERE id IN (\(placeholders))",
+                    arguments: arguments
+                )
+                index = end
+            }
+        }
+    }
+
+    public func importSignatures() throws -> Set<String> {
+        try db.read { database in
+            let rows = try String.fetchAll(database, sql: "SELECT signature FROM device_import")
+            return Set(rows)
+        }
+    }
+
+    public func recordImports(_ records: [(signature: String, relativePath: String)], at date: Date) throws {
+        guard !records.isEmpty else { return }
+        try db.write { database in
+            for record in records {
+                try database.execute(
+                    sql: """
+                    INSERT INTO device_import (signature, relativePath, importedAt)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(signature) DO UPDATE SET
+                      relativePath = excluded.relativePath,
+                      importedAt = excluded.importedAt
+                    """,
+                    arguments: [record.signature, record.relativePath, date.timeIntervalSince1970]
+                )
+            }
+        }
+    }
+
+    /// Adds or refreshes screenshot-tool folders. An existing enabled flag is kept.
+    /// A tool that is not in `tools` is left alone, so a missing preference file does not drop the index.
+    public func synchronizeCaptureTools(_ tools: [Source]) throws {
+        guard !tools.isEmpty else { return }
+        try db.write { database in
+            let existing = try Source.fetchAll(database)
+            for source in tools {
+                if var current = existing.first(where: { $0.id == source.id }) {
+                    current.rootPath = source.rootPath
+                    current.displayName = source.displayName
+                    current.kind = source.kind
+                    try current.save(database)
+                } else {
+                    try source.save(database)
+                }
+            }
         }
     }
 
@@ -237,9 +313,11 @@ public final class IndexDatabase: Sendable {
         SELECT * FROM asset
         WHERE sourceID IN (\(placeholders))
           AND mediaKind = COALESCE(?, mediaKind)
+          AND isHidden = ?
         ORDER BY (createdAt IS NULL), createdAt DESC, id ASC
         """
-        var arguments = StatementArguments(query.sourceIDs) + StatementArguments([query.mediaKind?.rawValue])
+        var arguments = StatementArguments(query.sourceIDs)
+            + StatementArguments([query.mediaKind?.rawValue, query.visibility == .hidden ? 1 : 0])
         if let limit {
             sql += "\nLIMIT ? OFFSET ?"
             arguments += StatementArguments([limit, offset])
@@ -302,6 +380,16 @@ public final class IndexDatabase: Sendable {
         migrator.registerMigration("v3-memory") { database in
             for statement in MemorySchema.statements {
                 try database.execute(sql: statement)
+            }
+        }
+        migrator.registerMigration("v4-hidden-import") { database in
+            try database.alter(table: "asset") { table in
+                table.add(column: "isHidden", .boolean).notNull().defaults(to: false)
+            }
+            try database.create(table: "device_import") { table in
+                table.primaryKey("signature", .text)
+                table.column("relativePath", .text).notNull()
+                table.column("importedAt", .double).notNull()
             }
         }
         return migrator
@@ -379,6 +467,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         focalLength = row["focalLength"]
         fileMTime = Self.date(row, "fileMTime")
         indexedAt = Self.date(row, "indexedAt")
+        isHidden = row["isHidden"] ?? false
     }
 
     public func encode(to container: inout PersistenceContainer) {
@@ -407,6 +496,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         container["focalLength"] = focalLength
         container["fileMTime"] = fileMTime?.timeIntervalSince1970
         container["indexedAt"] = indexedAt?.timeIntervalSince1970
+        container["isHidden"] = isHidden
     }
 
     private static func date(_ row: Row, _ column: String) -> Date? {

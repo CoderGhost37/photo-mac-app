@@ -19,7 +19,9 @@ public struct Indexer: Sendable {
     /// A missing folder is reported and does not wipe the existing index.
     public func scan(
         _ source: Source,
-        onProgress: (@Sendable (_ examined: Int, _ total: Int) -> Void)? = nil
+        onProgress: (@Sendable (_ examined: Int, _ total: Int) -> Void)? = nil,
+        onPause: (@Sendable (BackgroundPauseReason) -> Void)? = nil,
+        pauseReason: @Sendable () -> BackgroundPauseReason? = { nil }
     ) async throws -> ScanStats {
         guard source.kind != .photosLibrary else {
             throw IndexError.notAFolderSource(source.id)
@@ -52,6 +54,7 @@ public struct Indexer: Sendable {
         onProgress?(0, total)
 
         for (index, entry) in discovered.enumerated() {
+            await waitWhilePaused(pauseReason: pauseReason, onPause: onPause)
             seen.insert(entry.relativePath)
             if let prior = existingByRelative[entry.relativePath],
                prior.fileSize == entry.fileSize,
@@ -89,6 +92,24 @@ public struct Indexer: Sendable {
         try database.markScanned(sourceID: source.id, at: Date())
         onProgress?(total, total)
         return ScanStats(inserted: insertedCount, updated: updatedCount, deleted: deleted.count, skipped: skipped)
+    }
+
+    private func waitWhilePaused(
+        pauseReason: @Sendable () -> BackgroundPauseReason?,
+        onPause: (@Sendable (BackgroundPauseReason) -> Void)?
+    ) async {
+        var announced: BackgroundPauseReason?
+        while let reason = pauseReason() {
+            if announced != reason {
+                announced = reason
+                onPause?(reason)
+            }
+            do {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            } catch {
+                return
+            }
+        }
     }
 
     public func applyPhotosLibrary(existing: [Asset], incoming: [Asset], sourceID: String) throws -> ScanStats {

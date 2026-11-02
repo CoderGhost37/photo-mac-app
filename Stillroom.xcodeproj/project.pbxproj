@@ -26,6 +26,10 @@
 		A1000000000000000000004F /* UnderstandingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002F /* UnderstandingService.swift */; };
 		A10000000000000000000050 /* PlacesMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* PlacesMapView.swift */; };
 		A10000000000000000000051 /* HighlightPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* HighlightPlayer.swift */; };
+		A10000000000000000000052 /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* PowerMonitor.swift */; };
+		A10000000000000000000053 /* HiddenAuthentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* HiddenAuthentication.swift */; };
+		A10000000000000000000054 /* DeviceImportPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* DeviceImportPanel.swift */; };
+		A10000000000000000000055 /* CaptureToolLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* CaptureToolLocator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +54,10 @@
 		A1000000000000000000002F /* UnderstandingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnderstandingService.swift; sourceTree = "<group>"; };
 		A10000000000000000000030 /* PlacesMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesMapView.swift; sourceTree = "<group>"; };
 		A10000000000000000000031 /* HighlightPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightPlayer.swift; sourceTree = "<group>"; };
+		A10000000000000000000032 /* PowerMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerMonitor.swift; sourceTree = "<group>"; };
+		A10000000000000000000033 /* HiddenAuthentication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenAuthentication.swift; sourceTree = "<group>"; };
+		A10000000000000000000034 /* DeviceImportPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceImportPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000035 /* CaptureToolLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureToolLocator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +100,10 @@
 				A1000000000000000000002F /* UnderstandingService.swift */,
 				A10000000000000000000030 /* PlacesMapView.swift */,
 				A10000000000000000000031 /* HighlightPlayer.swift */,
+				A10000000000000000000032 /* PowerMonitor.swift */,
+				A10000000000000000000033 /* HiddenAuthentication.swift */,
+				A10000000000000000000034 /* DeviceImportPanel.swift */,
+				A10000000000000000000035 /* CaptureToolLocator.swift */,
 				A10000000000000000000013 /* Assets.xcassets */,
 				A10000000000000000000015 /* Info.plist */,
 				A10000000000000000000016 /* Stillroom.entitlements */,
@@ -194,6 +206,10 @@
 				A1000000000000000000004F /* UnderstandingService.swift in Sources */,
 				A10000000000000000000050 /* PlacesMapView.swift in Sources */,
 				A10000000000000000000051 /* HighlightPlayer.swift in Sources */,
+				A10000000000000000000052 /* PowerMonitor.swift in Sources */,
+				A10000000000000000000053 /* HiddenAuthentication.swift in Sources */,
+				A10000000000000000000054 /* DeviceImportPanel.swift in Sources */,
+				A10000000000000000000055 /* CaptureToolLocator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

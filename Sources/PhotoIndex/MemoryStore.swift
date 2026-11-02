@@ -94,6 +94,7 @@ extension IndexDatabase {
                 WHERE sourceID IN (\(placeholders))
                   AND latitude IS NOT NULL
                   AND longitude IS NOT NULL
+                  AND isHidden = 0
                 ORDER BY (createdAt IS NULL), createdAt DESC, id ASC
                 """,
                 arguments: StatementArguments(sourceIDs)
@@ -112,6 +113,7 @@ extension IndexDatabase {
                 WHERE sourceID IN (\(placeholders))
                   AND latitude IS NOT NULL
                   AND longitude IS NOT NULL
+                  AND isHidden = 0
                 """,
                 arguments: StatementArguments(sourceIDs)
             )
@@ -136,6 +138,7 @@ extension IndexDatabase {
                   AND latitude IS NOT NULL
                   AND longitude IS NOT NULL
                   AND (geocodedPlace IS NULL OR geocodedPlace = '')
+                  AND isHidden = 0
                 ORDER BY id ASC
                 """,
                 arguments: StatementArguments(sourceIDs)
@@ -356,7 +359,9 @@ extension IndexDatabase {
                            subject_member.sampleID AS sampleID
                     FROM subject_member
                     JOIN subject_sample ON subject_sample.id = subject_member.sampleID
+                    JOIN asset ON asset.id = subject_member.assetID
                     WHERE subject_member.clusterID = ?
+                      AND asset.isHidden = 0
                     ORDER BY subject_member.sampleID
                     """,
                     arguments: [id]
@@ -405,6 +410,7 @@ extension IndexDatabase {
                 FROM asset
                 LEFT JOIN image_print ON image_print.assetID = asset.id
                 WHERE asset.sourceID IN (\(placeholders))
+                  AND asset.isHidden = 0
                 """,
                 arguments: StatementArguments(sourceIDs)
             )
@@ -432,6 +438,7 @@ extension IndexDatabase {
                 SELECT id, createdAt, latitude, longitude, placeName, geocodedPlace
                 FROM asset
                 WHERE sourceID IN (\(placeholders))
+                  AND isHidden = 0
                 """,
                 arguments: StatementArguments(sourceIDs)
             )
@@ -443,6 +450,7 @@ extension IndexDatabase {
                 JOIN subject_cluster ON subject_cluster.id = subject_member.clusterID
                 JOIN asset ON asset.id = subject_member.assetID
                 WHERE asset.sourceID IN (\(placeholders))
+                  AND asset.isHidden = 0
                 """,
                 arguments: StatementArguments(sourceIDs)
             )
@@ -468,6 +476,7 @@ extension IndexDatabase {
                 FROM scene_label
                 JOIN asset ON asset.id = scene_label.assetID
                 WHERE asset.sourceID IN (\(placeholders))
+                  AND asset.isHidden = 0
                 ORDER BY scene_label.confidence DESC
                 """,
                 arguments: StatementArguments(sourceIDs)

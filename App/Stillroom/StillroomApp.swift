@@ -17,6 +17,10 @@ struct StillroomApp: App {
                     model.addFolder()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Import from iPhone…") {
+                    model.openImport()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
                 Button("Convert…") {
                     model.openConvert()
                 }

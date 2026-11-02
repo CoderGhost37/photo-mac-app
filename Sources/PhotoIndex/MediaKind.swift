@@ -14,4 +14,6 @@ public enum SourceKind: String, Codable, Sendable, Equatable, Hashable {
     case downloads
     case screenRecordings
     case folder
+    /// A screenshot app's own save folder, such as CleanShot X or Shottr.
+    case captureTool
 }

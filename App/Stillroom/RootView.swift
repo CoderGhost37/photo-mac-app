@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RootView: View {
@@ -61,7 +62,11 @@ struct RootView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
-                        if model.isIndexing {
+                        if model.machinePause != nil {
+                            Image(systemName: "pause.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                        if model.isIndexing && model.machinePause == nil {
                             ProgressView()
                                 .controlSize(.small)
                         }
@@ -109,12 +114,23 @@ struct RootView: View {
         .onChange(of: model.findToken) { _, _ in
             searchFocused = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            model.noteInactive()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NSProcessInfoPowerStateDidChangeNotification"))) { _ in
+            model.refreshLimits()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+            model.refreshLimits()
+        }
         .sheet(item: $model.presentedTool) { tool in
             switch tool {
             case .convert:
                 ConvertPanel(model: model, session: model.convertSession)
             case .pdf:
                 PDFPanel(model: model, session: model.pdfSession)
+            case .deviceImport:
+                DeviceImportPanel(model: model, session: model.importSession)
             }
         }
     }

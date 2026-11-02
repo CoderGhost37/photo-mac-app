@@ -9,11 +9,17 @@ final class UnderstandingService: @unchecked Sendable {
     private var draining = false
     private var again = false
     private let workDirectory: URL
+    private let pauseReason: @Sendable () -> BackgroundPauseReason?
     var onProgress: @Sendable (String?) -> Void = { _ in }
     var onUpdate: @Sendable () -> Void = {}
 
-    init(database: IndexDatabase, home: URL) {
+    init(
+        database: IndexDatabase,
+        home: URL,
+        pauseReason: @escaping @Sendable () -> BackgroundPauseReason? = { nil }
+    ) {
         self.database = database
+        self.pauseReason = pauseReason
         self.workDirectory = IndexLocation.workDirectory(home: home)
             .appendingPathComponent("Understanding", isDirectory: true)
     }
@@ -55,6 +61,7 @@ final class UnderstandingService: @unchecked Sendable {
             onProgress("Reading faces · \(remaining) left")
         }
         for id in pending {
+            await waitWhilePaused()
             if again { break }
             remaining -= 1
             if remaining % 10 == 0 {
@@ -100,6 +107,7 @@ final class UnderstandingService: @unchecked Sendable {
         var lastRequest: Date?
         var requests = 0
         for lookup in lookups {
+            await waitWhilePaused()
             if again { return false }
             if let cached = try? database.cachedPlace(key: lookup.cacheKey) {
                 if let name = cached.placeName, !name.isEmpty {
@@ -130,6 +138,18 @@ final class UnderstandingService: @unchecked Sendable {
             }
         }
         return false
+    }
+
+    private func waitWhilePaused() async {
+        while let reason = pauseReason() {
+            if again { return }
+            onProgress(BackgroundPause.message(reason))
+            do {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            } catch {
+                return
+            }
+        }
     }
 
     private func materialize(_ asset: Asset) -> Material? {

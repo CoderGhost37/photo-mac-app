@@ -83,6 +83,8 @@ enum MediaClassifier {
                 return looksLikeScreenRecording(relativePath) ? .screenRecording : .video
             }
             return looksLikeScreenshot(relativePath) ? .screenshot : .photo
+        case .captureTool:
+            return isVideo ? .screenRecording : .screenshot
         }
     }
 

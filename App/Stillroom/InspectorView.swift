@@ -197,6 +197,10 @@ struct InspectorView: View {
             HStack(spacing: 8) {
                 Button("Convert") { model.openConvert() }
                 Button("PDF") { model.openPDF() }
+                Button(asset.isHidden ? "Unhide" : "Hide") {
+                    model.setHidden(!asset.isHidden, assets: model.selectedAssets.contains(where: { $0.id == asset.id }) ? model.selectedAssets : [asset])
+                }
+                .help(asset.isHidden ? "Show this again in the library. The file is not changed." : "Hide this from the library, search, map, and highlights. The file is not changed.")
             }
             if model.browse == .people, model.selectedSubjectID != nil {
                 Button("Remove from this group") {

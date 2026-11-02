@@ -114,6 +114,19 @@ struct SidebarView: View {
                     }
                 }
 
+                Section("Hidden") {
+                    row(
+                        title: "Hidden",
+                        symbol: model.hiddenUnlocked ? "lock.open" : "lock",
+                        count: model.counts.hiddenCount,
+                        active: model.browse == .hidden,
+                        showsToggle: false,
+                        enabled: true
+                    ) {
+                        model.selectHidden()
+                    }
+                }
+
                 Section("Sources") {
                     ForEach(model.sources) { source in
                         row(
@@ -142,6 +155,14 @@ struct SidebarView: View {
                         model.addFolder()
                     } label: {
                         Label("Add Folder…", systemImage: "folder.badge.plus")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.accentColor)
+                    .padding(.vertical, 4)
+                    Button {
+                        model.openImport()
+                    } label: {
+                        Label("Import from iPhone…", systemImage: "iphone")
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.accentColor)

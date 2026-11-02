@@ -44,14 +44,15 @@ struct GridView: View {
                     assets: model.assets,
                     blocks: model.gridBlocks,
                     side: model.thumbnailSide,
-                    thumbnails: thumbnails,
                     selectedIDs: model.selectedAssets.map(\.id),
                     ranksResults: model.isSearching,
+                    thumbnails: thumbnails,
                     onSelect: { model.replaceSelection($0, focused: $1) },
                     onOpen: { model.open($0) },
                     onReveal: { model.reveal($0) },
                     onConvert: { model.showConvert($0) },
-                    onPDF: { model.showPDF($0) }
+                    onPDF: { model.showPDF($0) },
+                    onHide: { model.setHidden(!$0.isHidden, assets: [$0]) }
                 )
                 .id(model.queryToken)
             }
@@ -91,6 +92,7 @@ struct GridView: View {
         case .people: return model.selectedSubjectID == nil ? "People and pets" : "Nothing in this group"
         case .highlights: return "Highlights"
         case .duplicates: return "No duplicates"
+        case .hidden: return "Nothing is hidden"
         case .library:
             if model.counts.enabledTotal == 0 { return "Nothing here yet" }
             return "Nothing in this view"
@@ -116,6 +118,8 @@ struct GridView: View {
             return "Choose a highlight in the sidebar, or shuffle a memory. Playback stays on this Mac."
         case .duplicates:
             return "Exact copies share a file hash. Similar photos appear after this Mac reads them. Nothing is deleted."
+        case .hidden:
+            return "Hide a photo from the inspector or the menu on a thumbnail. The file stays where it is."
         case .library:
             if model.counts.enabledTotal == 0 {
                 return "Turn on Screenshots, Downloads, or the Photos library, or add a folder. Stillroom reads files where they are."
@@ -143,6 +147,7 @@ private struct AssetCollection: NSViewRepresentable {
     var onReveal: (Asset) -> Void
     var onConvert: (Asset) -> Void
     var onPDF: (Asset) -> Void
+    var onHide: (Asset) -> Void
 
     func makeNSView(context: Context) -> GridBrowser {
         let browser = GridBrowser()
@@ -152,6 +157,7 @@ private struct AssetCollection: NSViewRepresentable {
         browser.onReveal = onReveal
         browser.onConvert = onConvert
         browser.onPDF = onPDF
+        browser.onHide = onHide
         browser.ranksResults = ranksResults
         return browser
     }
@@ -163,6 +169,7 @@ private struct AssetCollection: NSViewRepresentable {
         browser.onReveal = onReveal
         browser.onConvert = onConvert
         browser.onPDF = onPDF
+        browser.onHide = onHide
         browser.apply(assets: assets, blocks: blocks, side: CGFloat(side), selectedIDs: selectedIDs, ranksResults: ranksResults)
     }
 }
@@ -172,7 +179,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     let collectionView = NSCollectionView()
     let layout = NSCollectionViewFlowLayout()
     var sections: [DaySection] = []
-    var rendered: [(String, String, Double)] = []
+    var rendered: [String] = []
     var renderedBlocks: [String] = []
     var side: CGFloat = 144
     var selectedIDs: [String] = []
@@ -184,6 +191,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     var onReveal: ((Asset) -> Void)?
     var onConvert: ((Asset) -> Void)?
     var onPDF: ((Asset) -> Void)?
+    var onHide: ((Asset) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -223,7 +231,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     required init?(coder: NSCoder) { nil }
 
     func apply(assets: [Asset], blocks: [GridBlock]?, side: CGFloat, selectedIDs: [String], ranksResults: Bool) {
-        let next = assets.map { ($0.id, $0.contentHash ?? "", $0.duration ?? -1) }
+        let next = assets.map { "\($0.id)\t\($0.contentHash ?? "")\t\($0.duration ?? -1)" }
         let blockIDs = blocks?.map { "\($0.id):\($0.assets.count)" } ?? []
         let contentChanged = next != rendered || blockIDs != renderedBlocks
         let sideChanged = abs(self.side - side) > 0.5
@@ -267,6 +275,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
         item.onReveal = { [weak self] in self?.onReveal?($0) }
         item.onConvert = { [weak self] in self?.onConvert?($0) }
         item.onPDF = { [weak self] in self?.onPDF?($0) }
+        item.onHide = { [weak self] in self?.onHide?($0) }
         item.configure(asset, thumbnails: thumbnails, scale: window?.backingScaleFactor ?? 2)
         return item
     }
@@ -388,6 +397,8 @@ private final class AssetItem: NSCollectionViewItem {
     var onReveal: ((Asset) -> Void)?
     var onConvert: ((Asset) -> Void)?
     var onPDF: ((Asset) -> Void)?
+    var onHide: ((Asset) -> Void)?
+    private let hideItem = NSMenuItem(title: "Hide", action: #selector(hideItemAction), keyEquivalent: "")
 
     override func loadView() {
         let root = NSView()
@@ -420,7 +431,7 @@ private final class AssetItem: NSCollectionViewItem {
         view.menu = contextMenu()
     }
 
-    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(revealItem) {
             return asset?.filePath != nil
         }
@@ -438,6 +449,7 @@ private final class AssetItem: NSCollectionViewItem {
     func configure(_ asset: Asset, thumbnails: ThumbnailService?, scale: CGFloat) {
         self.asset = asset
         assetID = asset.id
+        hideItem.title = asset.isHidden ? "Unhide" : "Hide"
         photo.image = nil
         if let duration = asset.duration, duration > 0,
            asset.mediaKind == .video || asset.mediaKind == .screenRecording {
@@ -483,12 +495,19 @@ private final class AssetItem: NSCollectionViewItem {
         convert.target = self
         let pdf = NSMenuItem(title: "Add to PDF…", action: #selector(pdfItem), keyEquivalent: "")
         pdf.target = self
+        hideItem.target = self
         menu.addItem(open)
         menu.addItem(reveal)
         menu.addItem(.separator())
         menu.addItem(convert)
         menu.addItem(pdf)
+        menu.addItem(hideItem)
         return menu
+    }
+
+    @objc private func hideItemAction() {
+        guard let asset else { return }
+        onHide?(asset)
     }
 
     @objc private func convertItem() {
