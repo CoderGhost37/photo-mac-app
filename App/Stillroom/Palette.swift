@@ -1,4 +1,5 @@
 import AppKit
+import PhotoIndex
 import SwiftUI
 
 enum Palette {

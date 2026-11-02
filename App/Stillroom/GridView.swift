@@ -431,7 +431,7 @@ private final class AssetItem: NSCollectionViewItem {
         view.menu = contextMenu()
     }
 
-    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(revealItem) {
             return asset?.filePath != nil
         }

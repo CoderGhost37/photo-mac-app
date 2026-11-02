@@ -274,6 +274,19 @@ extension DeviceImportSession: ICDeviceBrowserDelegate {
     }
 }
 
+extension DeviceImportSession: ICDeviceDelegate {
+    nonisolated func device(_ device: ICDevice, didOpenSessionWithError error: (any Error)?) {
+        guard let error else { return }
+        Task { @MainActor in
+            self.status = error.localizedDescription
+        }
+    }
+
+    nonisolated func device(_: ICDevice, didCloseSessionWithError _: (any Error)?) {}
+
+    nonisolated func didRemove(_: ICDevice) {}
+}
+
 extension DeviceImportSession: ICCameraDeviceDelegate {
     nonisolated func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
         Task { @MainActor in
@@ -288,6 +301,40 @@ extension DeviceImportSession: ICCameraDeviceDelegate {
             self.publishDevices()
             if self.identity(camera) == self.selectedID {
                 self.select(self.identity(camera))
+            }
+        }
+    }
+
+    nonisolated func cameraDevice(_ camera: ICCameraDevice, didAdd _: [ICCameraItem]) {
+        Task { @MainActor in
+            guard self.identity(camera) == self.selectedID else { return }
+            self.loadFiles(from: camera)
+        }
+    }
+
+    nonisolated func cameraDevice(_ camera: ICCameraDevice, didRemove _: [ICCameraItem]) {
+        Task { @MainActor in
+            guard self.identity(camera) == self.selectedID else { return }
+            self.loadFiles(from: camera)
+        }
+    }
+
+    nonisolated func cameraDevice(_: ICCameraDevice, didReceiveThumbnail _: CGImage?, for _: ICCameraItem, error _: (any Error)?) {}
+
+    nonisolated func cameraDevice(_: ICCameraDevice, didReceiveMetadata _: [AnyHashable: Any]?, for _: ICCameraItem, error _: (any Error)?) {}
+
+    nonisolated func cameraDevice(_: ICCameraDevice, didRenameItems _: [ICCameraItem]) {}
+
+    nonisolated func cameraDeviceDidChangeCapability(_: ICCameraDevice) {}
+
+    nonisolated func cameraDevice(_: ICCameraDevice, didReceivePTPEvent _: Data) {}
+
+    nonisolated func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {
+        guard let camera = device as? ICCameraDevice else { return }
+        Task { @MainActor in
+            self.publishDevices()
+            if self.identity(camera) == self.selectedID {
+                self.status = "Unlock the iPhone and trust this Mac. Stillroom does not delete photos from it."
             }
         }
     }
