@@ -174,8 +174,7 @@ struct SidebarView: View {
                     Label {
                         Text("Indexing \(Format.count(progress.completed)) of \(Format.count(progress.total))")
                     } icon: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .symbolEffect(.rotate, isActive: true)
+                        ScanningIcon()
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -209,6 +208,15 @@ struct SidebarView: View {
         case .pet: return "pawprint"
         case .food: return "fork.knife"
         case .roulette: return "sparkles"
+        }
+    }
+}
+
+private struct ScanningIcon: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .rotationEffect(.degrees(context.date.timeIntervalSinceReferenceDate * 240))
         }
     }
 }
