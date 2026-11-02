@@ -1,8 +1,14 @@
 name: macOS
 
 on:
+  # Branch pushes only. Creating the release tag must not start another run.
   push:
+    branches:
+      - "**"
   pull_request:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -15,3 +21,58 @@ jobs:
         run: swift test
       - name: Build Stillroom
         run: xcodebuild -project Stillroom.xcodeproj -scheme Stillroom -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Package Release Stillroom.app
+        run: |
+          set -euo pipefail
+          derived="${RUNNER_TEMP}/stillroom-release"
+          xcodebuild \
+            -project Stillroom.xcodeproj \
+            -scheme Stillroom \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$derived" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+          app="${derived}/Build/Products/Release/Stillroom.app"
+          xattr -cr "$app"
+          codesign --force --deep --sign - --entitlements App/Stillroom/Stillroom.entitlements "$app"
+          codesign -dv "$app" 2>&1 | tee "${RUNNER_TEMP}/codesign.txt"
+          grep -q 'Signature=adhoc' "${RUNNER_TEMP}/codesign.txt"
+          lipo -archs "${app}/Contents/MacOS/Stillroom" | tee "${RUNNER_TEMP}/archs.txt"
+          grep -q 'arm64' "${RUNNER_TEMP}/archs.txt"
+          zip="${RUNNER_TEMP}/Stillroom.zip"
+          ditto -c -k --keepParent "$app" "$zip"
+          unzip -l "$zip"
+          unzip -l "$zip" | grep -q 'Stillroom.app/Contents/MacOS/Stillroom'
+      - name: Upload Stillroom.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stillroom-macos
+          path: ${{ runner.temp }}/Stillroom.zip
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_RUN_NUMBER}"
+          title="Stillroom ${tag}"
+          notes="Ad-hoc signed Apple silicon Release build (${GITHUB_SHA}).
+
+          Move Stillroom.app to /Applications. The first time, right-click it and choose Open, or run: xattr -dr com.apple.quarantine /Applications/Stillroom.app"
+          asset="${RUNNER_TEMP}/Stillroom.zip"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber
+            gh release edit "$tag" --latest --title "$title" --notes "$notes"
+          else
+            gh release create "$tag" "$asset" \
+              --target "${GITHUB_SHA}" \
+              --title "$title" \
+              --notes "$notes" \
+              --latest
+          fi
