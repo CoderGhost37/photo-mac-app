@@ -111,9 +111,8 @@ public final class IndexDatabase: Sendable {
                        !kept.isEmpty {
                         asset.geocodedPlace = kept
                     }
-                    if existing.isHidden {
-                        asset.isHidden = true
-                    }
+                    asset.isHidden = existing.isHidden
+                    asset.isFavorite = existing.isFavorite
                 }
                 try asset.save(database)
                 try upsertKeyword(database, asset: asset)
@@ -190,16 +189,9 @@ public final class IndexDatabase: Sendable {
     public func countAssets(matching query: LibraryQuery) throws -> Int {
         guard !query.sourceIDs.isEmpty else { return 0 }
         return try db.read { database in
-            let placeholders = Array(repeating: "?", count: query.sourceIDs.count).joined(separator: ",")
-            let sql = """
-            SELECT COUNT(*) FROM asset
-            WHERE sourceID IN (\(placeholders))
-              AND mediaKind = COALESCE(?, mediaKind)
-              AND isHidden = ?
-            """
-            let arguments = StatementArguments(query.sourceIDs)
-                + StatementArguments([query.mediaKind?.rawValue, query.visibility == .hidden ? 1 : 0])
-            return try Int.fetchOne(database, sql: sql, arguments: arguments) ?? 0
+            let filter = Self.assetFilter(query: query, qualify: false)
+            let sql = "SELECT COUNT(*) FROM asset WHERE \(filter.sql)"
+            return try Int.fetchOne(database, sql: sql, arguments: filter.arguments) ?? 0
         }
     }
 
@@ -238,7 +230,48 @@ public final class IndexDatabase: Sendable {
                 }
             }
             let hiddenCount = try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM asset WHERE isHidden = 1") ?? 0
-            return LibraryCounts(bySource: bySource, byMediaKind: byKind, enabledTotal: enabledTotal, hiddenCount: hiddenCount)
+            var favoriteCount = 0
+            if !enabledSourceIDs.isEmpty {
+                let placeholders = Array(repeating: "?", count: enabledSourceIDs.count).joined(separator: ",")
+                favoriteCount = try Int.fetchOne(
+                    database,
+                    sql: """
+                    SELECT COUNT(*) FROM asset
+                    WHERE sourceID IN (\(placeholders))
+                      AND isHidden = 0
+                      AND isFavorite = 1
+                    """,
+                    arguments: StatementArguments(enabledSourceIDs)
+                ) ?? 0
+            }
+            return LibraryCounts(
+                bySource: bySource,
+                byMediaKind: byKind,
+                enabledTotal: enabledTotal,
+                hiddenCount: hiddenCount,
+                favoriteCount: favoriteCount
+            )
+        }
+    }
+
+    /// Sets the index flag only. The file on disk is not opened for writing.
+    public func setFavorite(_ favorite: Bool, assetIDs: [String]) throws {
+        guard !assetIDs.isEmpty else { return }
+        try db.write { database in
+            let chunk = 200
+            var index = 0
+            while index < assetIDs.count {
+                let end = min(index + chunk, assetIDs.count)
+                let slice = Array(assetIDs[index..<end])
+                let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+                var arguments = StatementArguments([favorite])
+                arguments += StatementArguments(slice)
+                try database.execute(
+                    sql: "UPDATE asset SET isFavorite = ? WHERE id IN (\(placeholders))",
+                    arguments: arguments
+                )
+                index = end
+            }
         }
     }
 
@@ -308,19 +341,39 @@ public final class IndexDatabase: Sendable {
     }
 
     private static func listSQL(query: LibraryQuery, limit: Int?, offset: Int) -> (String, StatementArguments) {
-        let placeholders = Array(repeating: "?", count: query.sourceIDs.count).joined(separator: ",")
+        let filter = assetFilter(query: query, qualify: false)
         var sql = """
         SELECT * FROM asset
-        WHERE sourceID IN (\(placeholders))
-          AND mediaKind = COALESCE(?, mediaKind)
-          AND isHidden = ?
+        WHERE \(filter.sql)
         ORDER BY (createdAt IS NULL), createdAt DESC, id ASC
         """
-        var arguments = StatementArguments(query.sourceIDs)
-            + StatementArguments([query.mediaKind?.rawValue, query.visibility == .hidden ? 1 : 0])
+        var arguments = filter.arguments
         if let limit {
             sql += "\nLIMIT ? OFFSET ?"
             arguments += StatementArguments([limit, offset])
+        }
+        return (sql, arguments)
+    }
+
+    /// Shared WHERE body for list, count, and search. `qualify` prefixes columns with `asset.`.
+    static func assetFilter(query: LibraryQuery, qualify: Bool) -> (sql: String, arguments: StatementArguments) {
+        let source = qualify ? "asset.sourceID" : "sourceID"
+        let kind = qualify ? "asset.mediaKind" : "mediaKind"
+        let hidden = qualify ? "asset.isHidden" : "isHidden"
+        let favorite = qualify ? "asset.isFavorite" : "isFavorite"
+        let created = qualify ? "asset.createdAt" : "createdAt"
+        let placeholders = Array(repeating: "?", count: query.sourceIDs.count).joined(separator: ",")
+        var sql = """
+        \(source) IN (\(placeholders)) AND \(kind) = COALESCE(?, \(kind)) AND \(hidden) = ?
+        """
+        var arguments = StatementArguments(query.sourceIDs)
+            + StatementArguments([query.mediaKind?.rawValue, query.visibility == .hidden ? 1 : 0])
+        if query.favoritesOnly {
+            sql += " AND \(favorite) = 1"
+        }
+        if let createdAfter = query.createdAfter {
+            sql += " AND \(created) >= ?"
+            arguments += StatementArguments([createdAfter.timeIntervalSince1970])
         }
         return (sql, arguments)
     }
@@ -390,6 +443,11 @@ public final class IndexDatabase: Sendable {
                 table.primaryKey("signature", .text)
                 table.column("relativePath", .text).notNull()
                 table.column("importedAt", .double).notNull()
+            }
+        }
+        migrator.registerMigration("v5-favorite") { database in
+            try database.alter(table: "asset") { table in
+                table.add(column: "isFavorite", .boolean).notNull().defaults(to: false)
             }
         }
         return migrator
@@ -468,6 +526,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         fileMTime = Self.date(row, "fileMTime")
         indexedAt = Self.date(row, "indexedAt")
         isHidden = row["isHidden"] ?? false
+        isFavorite = row["isFavorite"] ?? false
     }
 
     public func encode(to container: inout PersistenceContainer) {
@@ -497,6 +556,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         container["fileMTime"] = fileMTime?.timeIntervalSince1970
         container["indexedAt"] = indexedAt?.timeIntervalSince1970
         container["isHidden"] = isHidden
+        container["isFavorite"] = isFavorite
     }
 
     private static func date(_ row: Row, _ column: String) -> Date? {

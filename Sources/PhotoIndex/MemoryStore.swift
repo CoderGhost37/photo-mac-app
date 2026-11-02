@@ -341,6 +341,16 @@ extension IndexDatabase {
         }
     }
 
+    public func sceneLabels(assetID: String) throws -> [String] {
+        try db.read { database in
+            try String.fetchAll(
+                database,
+                sql: "SELECT label FROM scene_label WHERE assetID = ? ORDER BY confidence DESC, label ASC",
+                arguments: [assetID]
+            )
+        }
+    }
+
     public func subjectClusters() throws -> [SubjectClusterRecord] {
         try db.read { database in
             let clusters = try Row.fetchAll(database, sql: "SELECT id, kind, name FROM subject_cluster ORDER BY id")
