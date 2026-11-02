@@ -283,7 +283,7 @@ extension IndexDatabase {
             arguments: [
                 asset.id,
                 SearchDocument.filename(path: asset.filePath),
-                asset.placeName ?? "",
+                PlaceName.searchable(stored: asset.placeName, geocoded: asset.geocodedPlace),
                 SearchDocument.dateText(for: asset.createdAt, calendar: .current)
             ]
         )
@@ -330,6 +330,10 @@ extension IndexDatabase {
                 Self.evidence(id: id, tokens: matches, inRange: range != nil)
             }
         }
+    }
+
+    public func embeddingVectors(modelID: String, scope: LibraryQuery) throws -> [EmbeddedAsset] {
+        try embeddings(modelID: modelID, scope: scope)
     }
 
     private func embeddings(modelID: String, scope: LibraryQuery) throws -> [EmbeddedAsset] {

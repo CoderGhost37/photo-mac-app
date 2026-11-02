@@ -23,6 +23,9 @@
 		A1000000000000000000004C /* PDFPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* PDFPanel.swift */; };
 		A1000000000000000000004D /* ContinuityScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* ContinuityScan.swift */; };
 		A1000000000000000000004E /* RecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002E /* RecognitionService.swift */; };
+		A1000000000000000000004F /* UnderstandingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002F /* UnderstandingService.swift */; };
+		A10000000000000000000050 /* PlacesMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* PlacesMapView.swift */; };
+		A10000000000000000000051 /* HighlightPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* HighlightPlayer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +47,9 @@
 		A1000000000000000000002C /* PDFPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPanel.swift; sourceTree = "<group>"; };
 		A1000000000000000000002D /* ContinuityScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuityScan.swift; sourceTree = "<group>"; };
 		A1000000000000000000002E /* RecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecognitionService.swift; sourceTree = "<group>"; };
+		A1000000000000000000002F /* UnderstandingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnderstandingService.swift; sourceTree = "<group>"; };
+		A10000000000000000000030 /* PlacesMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesMapView.swift; sourceTree = "<group>"; };
+		A10000000000000000000031 /* HighlightPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightPlayer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +89,9 @@
 				A1000000000000000000002C /* PDFPanel.swift */,
 				A1000000000000000000002D /* ContinuityScan.swift */,
 				A1000000000000000000002E /* RecognitionService.swift */,
+				A1000000000000000000002F /* UnderstandingService.swift */,
+				A10000000000000000000030 /* PlacesMapView.swift */,
+				A10000000000000000000031 /* HighlightPlayer.swift */,
 				A10000000000000000000013 /* Assets.xcassets */,
 				A10000000000000000000015 /* Info.plist */,
 				A10000000000000000000016 /* Stillroom.entitlements */,
@@ -182,6 +191,9 @@
 				A1000000000000000000004C /* PDFPanel.swift in Sources */,
 				A1000000000000000000004D /* ContinuityScan.swift in Sources */,
 				A1000000000000000000004E /* RecognitionService.swift in Sources */,
+				A1000000000000000000004F /* UnderstandingService.swift in Sources */,
+				A10000000000000000000050 /* PlacesMapView.swift in Sources */,
+				A10000000000000000000051 /* HighlightPlayer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

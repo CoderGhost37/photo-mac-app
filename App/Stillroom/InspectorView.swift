@@ -170,8 +170,8 @@ struct InspectorView: View {
             if let exposure = exposureLine(asset) {
                 fact("Exposure", exposure)
             }
-            if let placeName = asset.placeName {
-                fact("Place", placeName)
+            if let place = displayedPlace(asset) {
+                fact("Place", place)
             }
             if let place = Format.coordinate(latitude: asset.latitude, longitude: asset.longitude) {
                 fact("Location", place)
@@ -198,8 +198,25 @@ struct InspectorView: View {
                 Button("Convert") { model.openConvert() }
                 Button("PDF") { model.openPDF() }
             }
+            if model.browse == .people, model.selectedSubjectID != nil {
+                Button("Remove from this group") {
+                    model.removeSelectedFromSubject()
+                }
+                .help("The photo stays in the library. It leaves this person or pet.")
+            }
         }
         .controlSize(.small)
+    }
+
+    private func displayedPlace(_ asset: Asset) -> String? {
+        let stored = asset.placeName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let geocoded = asset.geocodedPlace?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !stored.isEmpty && !geocoded.isEmpty && stored.caseInsensitiveCompare(geocoded) != .orderedSame {
+            return "\(stored) · \(geocoded)"
+        }
+        if !stored.isEmpty { return stored }
+        if !geocoded.isEmpty { return geocoded }
+        return nil
     }
 
     private func fact(_ label: String, _ value: String) -> some View {
