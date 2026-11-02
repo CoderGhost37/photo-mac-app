@@ -70,7 +70,7 @@ public enum RasterImage {
     }
 }
 
-/// Face prints, pet prints, scene labels, and one image print. All of it stays on device.
+/// Face crops, pet crops, scene labels, and one image print. All of it stays on device.
 public enum VisionMemory {
     public static func read(cgImage: CGImage, assetID: String) throws -> VisionRead {
         let subjects = try peopleAndPets(in: cgImage, assetID: assetID)
@@ -121,24 +121,17 @@ public enum VisionMemory {
         let faceObservations = (faces.results ?? []).filter { face in
             face.boundingBox.width >= 0.02 && face.boundingBox.height >= 0.02
         }
-        if !faceObservations.isEmpty {
-            let prints = VNGenerateFaceFeaturePrintRequest()
-            prints.inputFaceObservations = faceObservations
-            try handler.perform([prints])
-            let featurePrints = prints.results ?? []
-            if featurePrints.count == faceObservations.count {
-                for (index, pair) in zip(faceObservations, featurePrints).enumerated() {
-                    guard let vector = floats(from: pair.1), !vector.isEmpty else { continue }
-                    subjects.append(StoredSubject(
-                        id: SubjectSampleID.make(assetID: assetID, kind: .person, index: index),
-                        assetID: assetID,
-                        kind: .person,
-                        box: box(pair.0.boundingBox),
-                        confidence: Double(pair.0.confidence),
-                        vector: vector
-                    ))
-                }
-            }
+        for (index, face) in faceObservations.enumerated() {
+            guard let crop = crop(image, normalized: face.boundingBox, minSide: 8),
+                  let vector = imagePrint(crop), !vector.isEmpty else { continue }
+            subjects.append(StoredSubject(
+                id: SubjectSampleID.make(assetID: assetID, kind: .person, index: index),
+                assetID: assetID,
+                kind: .person,
+                box: box(face.boundingBox),
+                confidence: Double(face.confidence),
+                vector: vector
+            ))
         }
 
         let animals = VNRecognizeAnimalsRequest()
@@ -155,7 +148,7 @@ public enum VisionMemory {
             } else {
                 continue
             }
-            guard let crop = crop(image, normalized: observation.boundingBox),
+            guard let crop = crop(image, normalized: observation.boundingBox, minSide: 20),
                   let vector = imagePrint(crop), !vector.isEmpty else { continue }
             let index = petIndex[kind] ?? 0
             petIndex[kind] = index + 1
@@ -192,7 +185,7 @@ public enum VisionMemory {
         NormalizedBox(x: rect.origin.x, y: rect.origin.y, width: rect.width, height: rect.height).clamped()
     }
 
-    private static func crop(_ image: CGImage, normalized: CGRect) -> CGImage? {
+    private static func crop(_ image: CGImage, normalized: CGRect, minSide: CGFloat) -> CGImage? {
         let width = CGFloat(image.width)
         let height = CGFloat(image.height)
         let rect = CGRect(
@@ -201,7 +194,7 @@ public enum VisionMemory {
             width: normalized.width * width,
             height: normalized.height * height
         ).integral
-        guard rect.width >= 20, rect.height >= 20 else { return nil }
+        guard rect.width >= minSide, rect.height >= minSide else { return nil }
         return image.cropping(to: rect)
     }
 }

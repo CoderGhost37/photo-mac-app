@@ -102,7 +102,7 @@ The sidebar Map shows every geotagged photo and video. Markers cluster on a grid
 
 ## People and pets
 
-Still photos and screenshots are read with Vision. Faces use `VNGenerateFaceFeaturePrintRequest`. Cats and dogs use `VNRecognizeAnimalsRequest`, then an image feature print of the crop, and are clustered into individual pets when the prints are close. The sidebar lists each group and its count. You can rename a group, merge two groups of the same kind, or remove a photo from a group. Removing a photo does not delete the file, and the photo is not put back into that group on the next pass. Groups stay in the local index.
+Still photos and screenshots are read with Vision. Faces are found with `VNDetectFaceRectanglesRequest`, then clustered with an image feature print of each face crop. Cats and dogs use `VNRecognizeAnimalsRequest`, then an image feature print of the crop, and are clustered into individual pets when the prints are close. The sidebar lists each group and its count. You can rename a group, merge two groups of the same kind, or remove a photo from a group. Removing a photo does not delete the file, and the photo is not put back into that group on the next pass. Groups stay in the local index.
 
 ## Highlights
 

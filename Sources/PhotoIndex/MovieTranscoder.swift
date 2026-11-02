@@ -43,7 +43,7 @@ public enum MovieTranscoder {
             let audio = try await asset.loadTracks(withMediaType: .audio)
             guard !audio.isEmpty else { throw ConvertFailure.noAudio(input.lastPathComponent) }
         }
-        let preset = try presetName(for: format, asset: asset)
+        let preset = try await presetName(for: format, asset: asset)
         let fileType = try fileType(for: format)
         guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
             throw ConvertFailure.exportFailed("Could not open \(input.lastPathComponent) for export.")

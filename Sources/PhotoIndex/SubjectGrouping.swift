@@ -72,7 +72,7 @@ public struct SubjectClusterRecord: Equatable, Sendable, Identifiable {
 /// Groups face and pet prints. Distance is cosine distance (1 - cosine): 0 is the same print.
 /// Existing names, membership, and rejected photos are kept. Only new samples are assigned.
 public enum SubjectGrouping {
-    /// Face prints at or under this cosine distance join a person.
+    /// Face-crop prints at or under this cosine distance join a person.
     public static let personDistance = 0.35
     /// Pet crops at or under this cosine distance join a cat or a dog.
     public static let petDistance = 0.40

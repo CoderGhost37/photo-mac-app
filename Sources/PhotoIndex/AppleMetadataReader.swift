@@ -147,9 +147,8 @@ enum AVMovieMetadata {
            let date = try? await creation.load(.dateValue) {
             meta.createdAt = date
         }
-        if let tracks = try? await asset.load(.tracks) {
+        if let tracks = try? await asset.loadTracks(withMediaType: .video) {
             for track in tracks {
-                guard (try? await track.load(.mediaType)) == .video else { continue }
                 guard let size = try? await track.load(.naturalSize) else { break }
                 let transform = (try? await track.load(.preferredTransform)) ?? .identity
                 let rect = CGRect(origin: .zero, size: size).applying(transform)
