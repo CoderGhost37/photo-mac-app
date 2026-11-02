@@ -22,7 +22,7 @@ The index is a SQLite database in `~/Library/Application Support/Stillroom/` on 
 
 Each Mac builds or runs its own copy and keeps its own index. Do not copy `~/Library/Application Support/Stillroom/` between machines. The index only describes files on that Mac.
 
-The straightforward way is to clone the repo on each Mac and build it there. An Xcode build matches the chip you built it on, so an Apple silicon build does not run on Intel, and the reverse.
+The straightforward way is to clone the repo on each Mac and build it there, or install the Apple silicon build from the latest GitHub Release (see [Install without Xcode](#install-without-xcode)). An Xcode build matches the chip you built it on, so an Apple silicon build does not run on Intel, and the reverse.
 
 To copy an already built app to another Mac of the same kind:
 
@@ -35,6 +35,22 @@ codesign --force --deep --sign - /path/to/Stillroom.app
 ```
 
 3. Right-click the app and choose Open the first time, then Open in the dialog. After that it launches normally. There is no developer team and no license check.
+
+## Install without Xcode
+
+Every push to `main` publishes a Release build of `Stillroom.app` for Apple silicon. GitHub's macOS runner is Apple silicon, and the workflow ad-hoc signs the app with `codesign --sign -` so it can launch there. There is no Apple Developer account, so the app has no Developer ID signature and no notarization. An Intel Mac still needs the Xcode build below.
+
+Download [Stillroom.zip](https://github.com/CoderGhost37/photo-mac-app/releases/latest/download/Stillroom.zip) from the [latest release](https://github.com/CoderGhost37/photo-mac-app/releases/latest). The release tag is `build-<run number>`.
+
+1. Unzip `Stillroom.zip`.
+2. Move `Stillroom.app` to `/Applications`.
+3. macOS quarantines the download and blocks the first launch. Right-click `Stillroom.app`, choose Open, then Open in the dialog. Or clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Stillroom.app
+```
+
+The zip does not include the CLIP description model. To rank pictures by a description, run `Scripts/fetch-clip.sh` on a Mac. That script needs Python 3. It installs `coremltools`, PyTorch, and the CLIP Python package into a virtualenv, then compiles the models with `xcrun coremlcompiler`, which ships with Xcode. Without `xcrun`, the script stops after writing `.mlpackage` files and Stillroom does not load them. Library, search-by-text, convert, and the other tools run from the downloaded app without that model and without Xcode.
 
 ## Build and run
 
@@ -60,7 +76,7 @@ swift test
 
 On Linux, install a Swift 6.1+ toolchain and `libsqlite3-dev` first. Apple-only code (PhotoKit, AppKit, ImageIO, AVFoundation, Vision, Core ML, FSEvents, ImageCaptureCore, LocalAuthentication, IOKit) is compiled only where those frameworks exist. WebP encoding uses libwebp and is tested on Linux.
 
-GitHub Actions runs `swift test` and `xcodebuild -project Stillroom.xcodeproj -scheme Stillroom -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build` on `macos-latest` for pushes and pull requests. See `.github/workflows/macos.yml`.
+GitHub Actions, on `macos-latest` for branch pushes and pull requests, runs `swift test` and `xcodebuild -project Stillroom.xcodeproj -scheme Stillroom -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build`, then a Release build. It ad-hoc signs that app, zips it with `ditto -c -k --keepParent`, and uploads `Stillroom.zip`. A push to `main` also publishes a GitHub Release tagged `build-<run number>` with the zip attached. Pull requests do not publish a release. See `.github/workflows/macos.yml`.
 
 ## Convert and PDF
 
