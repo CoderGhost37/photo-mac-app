@@ -20,7 +20,7 @@ struct InspectorView: View {
                 )
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: model.selectedAsset?.id) {
             preview = nil
             hits = []
@@ -35,53 +35,52 @@ struct InspectorView: View {
     }
 
     private func detail(_ asset: Asset) -> some View {
-        Form {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
                 previewBlock(asset)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title(for: asset))
                         .font(.headline)
                         .textSelection(.enabled)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if model.selectedAssets.count > 1 {
                         Text("\(Format.count(model.selectedAssets.count)) selected")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                 }
-            }
-            Section {
-                labeled("Date", Format.timestamp(asset.createdAt))
-                if let camera = cameraLens(asset) {
-                    labeled("Camera", camera)
+                VStack(alignment: .leading, spacing: 8) {
+                    labeled("Date", Format.timestamp(asset.createdAt))
+                    if let camera = cameraLens(asset) {
+                        labeled("Camera", camera)
+                    }
+                    if let summary = summaryLine(asset) {
+                        labeled("Info", summary)
+                    }
+                    if let exposure = exposureLine(asset) {
+                        labeled("Exposure", exposure)
+                    }
+                    if let place = displayedPlace(asset) {
+                        labeled("Place", place)
+                    }
+                    if let coordinate = Format.coordinate(latitude: asset.latitude, longitude: asset.longitude) {
+                        labeled("Location", coordinate)
+                    }
+                    if let path = asset.filePath {
+                        labeled("Path", path, truncateMiddle: true)
+                    } else if asset.photosLocalIdentifier != nil {
+                        labeled("Where", "Photos library")
+                    }
                 }
-                if let summary = summaryLine(asset) {
-                    labeled("Info", summary)
-                }
-                if let exposure = exposureLine(asset) {
-                    labeled("Exposure", exposure)
-                }
-                if let place = displayedPlace(asset) {
-                    labeled("Place", place)
-                }
-                if let coordinate = Format.coordinate(latitude: asset.latitude, longitude: asset.longitude) {
-                    labeled("Location", coordinate)
-                }
-                if let path = asset.filePath {
-                    labeled("Path", path)
-                } else if asset.photosLocalIdentifier != nil {
-                    labeled("Where", "Photos library")
-                }
-            }
-            if let latitude = asset.latitude, let longitude = asset.longitude {
-                Section {
+                if let latitude = asset.latitude, let longitude = asset.longitude {
                     placeMap(latitude: latitude, longitude: longitude)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                        .frame(maxWidth: .infinity)
                 }
-            }
-            let people = model.people(in: asset)
-            if !people.isEmpty {
-                Section("People") {
+                let people = model.people(in: asset)
+                if !people.isEmpty {
+                    Text("People")
+                        .font(.callout.weight(.semibold))
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(people) { cluster in
@@ -92,17 +91,19 @@ struct InspectorView: View {
                     }
                     .frame(height: 78)
                 }
-            }
-            if !labels.isEmpty {
-                Section("Keywords") {
+                if !labels.isEmpty {
+                    Text("Keywords")
+                        .font(.callout.weight(.semibold))
                     Text(labels.joined(separator: ", "))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            if !hits.isEmpty {
-                Section("Text found") {
+                if !hits.isEmpty {
+                    Text("Text found")
+                        .font(.callout.weight(.semibold))
                     ForEach(hits) { hit in
                         Text(hit.text)
                             .font(.callout)
@@ -125,58 +126,64 @@ struct InspectorView: View {
                             }
                     }
                 }
-            }
-            Section {
                 actionButtons(asset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
         .font(.callout)
     }
 
-    private func labeled(_ label: String, _ value: String) -> some View {
-        LabeledContent {
+    private func labeled(_ label: String, _ value: String, truncateMiddle: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label)
+                .font(.callout)
+                .fixedSize(horizontal: true, vertical: false)
             Text(value)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .multilineTextAlignment(.trailing)
-        } label: {
-            Text(label)
-                .font(.callout)
+                .lineLimit(truncateMiddle ? 2 : 3)
+                .truncationMode(truncateMiddle ? .middle : .tail)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func previewBlock(_ asset: Asset) -> some View {
-        Color.clear
+        Color.primary.opacity(0.06)
             .aspectRatio(16.0 / 10.0, contentMode: .fit)
             .overlay {
-                GeometryReader { geo in
-                    let imageSize = preview?.size ?? CGSize(width: 16, height: 10)
-                    let fitted = AspectFit.rect(
-                        containerWidth: geo.size.width,
-                        containerHeight: geo.size.height,
-                        imageWidth: imageSize.width,
-                        imageHeight: imageSize.height
-                    )
-                    ZStack(alignment: .topLeading) {
-                        Color.primary.opacity(0.04)
-                        if let preview, let fitted {
-                            Image(nsImage: preview)
-                                .resizable()
-                                .frame(width: fitted.width, height: fitted.height)
-                                .position(x: fitted.x + fitted.width / 2, y: fitted.y + fitted.height / 2)
-                            boxes(in: fitted)
-                        } else {
-                            Image(systemName: Format.mediaSymbol(asset.mediaKind))
-                                .font(.system(size: 32))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    }
+                if let preview {
+                    Image(nsImage: preview)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Image(systemName: Format.mediaSymbol(asset.mediaKind))
+                        .font(.system(size: 28))
+                        .foregroundStyle(.secondary)
                 }
             }
+            .overlay {
+                GeometryReader { geo in
+                    if let preview,
+                       let fitted = AspectFit.rect(
+                        containerWidth: geo.size.width,
+                        containerHeight: geo.size.height,
+                        imageWidth: preview.size.width,
+                        imageHeight: preview.size.height
+                       ) {
+                        boxes(in: fitted)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(maxWidth: .infinity)
     }
 
     private var matchedHits: [TextHit] {
@@ -256,7 +263,7 @@ struct InspectorView: View {
 
     private func actionButtons(_ asset: Asset) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], alignment: .leading, spacing: 8) {
                 Button("Open") { model.open(asset) }
                 if asset.filePath != nil {
                     Button("Show in Finder") { model.reveal(asset) }
@@ -266,8 +273,6 @@ struct InspectorView: View {
                 Button(asset.isFavorite ? "Unfavorite" : "Favorite") {
                     model.setFavorite(!asset.isFavorite, assets: model.selectedAssets.contains(where: { $0.id == asset.id }) ? model.selectedAssets : [asset])
                 }
-            }
-            HStack(spacing: 8) {
                 Button("Convert") { model.openConvert() }
                 Button("PDF") { model.openPDF() }
                 Button(asset.isHidden ? "Unhide" : "Hide") {

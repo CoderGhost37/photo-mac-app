@@ -4,7 +4,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Bindable var model: AppModel
-    @AppStorage("sidebar.mediaTypesExpanded") private var mediaTypesExpanded = false
+    @AppStorage("sidebar.mediaTypesExpanded") private var mediaTypesExpanded = true
     @AppStorage("sidebar.memoriesExpanded") private var memoriesExpanded = true
     @AppStorage("sidebar.utilitiesExpanded") private var utilitiesExpanded = true
     @AppStorage("sidebar.sourcesExpanded") private var sourcesExpanded = true
@@ -51,9 +51,10 @@ struct SidebarView: View {
 
                 Section("Memories", isExpanded: $memoriesExpanded) {
                     if model.sidebarStories.isEmpty {
-                        Text("Memories appear when the library has places, people, or trips.")
+                        Text("No memories yet")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
                     ForEach(model.sidebarStories) { story in
                         Label {
@@ -98,23 +99,29 @@ struct SidebarView: View {
 
                 Section("Sources", isExpanded: $sourcesExpanded) {
                     ForEach(model.sources) { source in
+                        let count = model.counts.bySource[source.id] ?? 0
                         HStack(spacing: 8) {
                             Label(source.displayName, systemImage: Format.sourceSymbol(source.kind))
                                 .foregroundStyle(source.enabled ? .primary : .secondary)
                                 .lineLimit(1)
-                            Spacer(minLength: 4)
+                            Spacer(minLength: 8)
+                            if count > 0 {
+                                Text(Format.count(count))
+                                    .font(.body.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
                             Toggle(
-                                "",
+                                source.enabled ? "Included in the library" : "Turn on to index this source",
                                 isOn: Binding(
                                     get: { source.enabled },
                                     set: { model.setEnabled($0, sourceID: source.id) }
                                 )
                             )
-                            .toggleStyle(.checkbox)
+                            .toggleStyle(.switch)
                             .labelsHidden()
+                            .controlSize(.small)
                             .help(source.enabled ? "Included in the library" : "Turn on to index this source")
                         }
-                        .badge(model.counts.bySource[source.id] ?? 0)
                         .tag(SidebarSelection.source(source.id))
                         .contextMenu {
                             if source.kind == .folder {

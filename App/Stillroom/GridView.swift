@@ -86,15 +86,15 @@ struct GridView: View {
                             .padding(.top, 12)
                     }
                     if sections.count == 1, sections[0].title.isEmpty {
-                        photoGrid(sections[0].assets)
-                            .padding(.horizontal, 4)
+                        photoGrid(sections[0].assets, width: gridWidth(geo.size.width))
+                            .padding(.horizontal, 2)
                             .padding(.vertical, 2)
                     } else {
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                             ForEach(sections) { section in
                                 Section {
-                                    photoGrid(section.assets)
-                                        .padding(.horizontal, 4)
+                                    photoGrid(section.assets, width: gridWidth(geo.size.width))
+                                        .padding(.horizontal, 2)
                                         .padding(.bottom, 4)
                                 } header: {
                                     if !section.title.isEmpty {
@@ -111,12 +111,12 @@ struct GridView: View {
                     }
                 }
             }
-            .onAppear { model.updateColumnEstimate(width: geo.size.width) }
+            .onAppear { model.updateColumnEstimate(width: gridWidth(geo.size.width)) }
             .onChange(of: geo.size.width) { _, width in
-                model.updateColumnEstimate(width: width)
+                model.updateColumnEstimate(width: gridWidth(width))
             }
             .onChange(of: model.thumbnailSide) { _, _ in
-                model.updateColumnEstimate(width: geo.size.width)
+                model.updateColumnEstimate(width: gridWidth(geo.size.width))
             }
             .gesture(zoomGesture)
         }
@@ -191,21 +191,30 @@ struct GridView: View {
         .background(.bar)
     }
 
-    private func photoGrid(_ assets: [Asset]) -> some View {
-        let thumb = CGFloat(model.thumbnailSide)
-        let columns = [GridItem(.adaptive(minimum: thumb, maximum: thumb * 1.4), spacing: 2)]
-        return LazyVGrid(columns: columns, spacing: 2) {
+    private func gridWidth(_ container: CGFloat) -> CGFloat {
+        max(0, container - 4)
+    }
+
+    /// Equal squares that consume the row. Column count follows the zoom slider; leftover width is shared so nothing overlaps or leaves a ragged gap.
+    private func photoGrid(_ assets: [Asset], width: CGFloat) -> some View {
+        let spacing: CGFloat = 2
+        let minimum = max(80, CGFloat(model.thumbnailSide))
+        let usable = max(minimum, width)
+        let count = max(1, Int((usable + spacing) / (minimum + spacing)))
+        let columns = Array(repeating: GridItem(.flexible(minimum: 0), spacing: spacing), count: count)
+        return LazyVGrid(columns: columns, spacing: spacing) {
             ForEach(assets) { asset in
                 PhotoTile(
                     model: model,
                     asset: asset,
-                    side: thumb,
+                    side: minimum,
                     namespace: namespace,
                     selected: model.selectedAssets.contains(where: { $0.id == asset.id })
                 )
                 .id(asset.id)
             }
         }
+        .frame(width: usable, alignment: .leading)
     }
 
     private var peopleGrid: some View {
@@ -392,23 +401,32 @@ private struct PhotoTile: View {
     @State private var hovering = false
 
     var body: some View {
-        ZStack {
-            Rectangle().fill(.quaternary)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .opacity(revealed ? 1 : 0)
-            } else {
-                Image(systemName: Format.mediaSymbol(asset.mediaKind))
-                    .font(.title3)
-                    .foregroundStyle(.tertiary)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                GeometryReader { geo in
+                    ZStack {
+                        Rectangle().fill(.quaternary)
+                        if let image {
+                            Image(nsImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                                .opacity(revealed ? 1 : 0)
+                        } else {
+                            Image(systemName: Format.mediaSymbol(asset.mediaKind))
+                                .font(.title3)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                }
             }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
-        .overlay {
+            .clipped()
+            .contentShape(Rectangle())
+            .overlay {
             if selected {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .strokeBorder(Color.accentColor, lineWidth: 3)

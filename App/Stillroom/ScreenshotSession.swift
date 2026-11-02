@@ -20,6 +20,7 @@ enum ScreenshotSession {
         NSApp.setActivationPolicy(.regular)
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.activate(ignoringOtherApps: true)
+        UserDefaults.standard.set(true, forKey: "sidebar.mediaTypesExpanded")
         model.start()
         await settle(0.8)
         prepareWindow()
@@ -37,14 +38,6 @@ enum ScreenshotSession {
         capture("all-photos")
         capture("sidebar")
 
-        if let hero = model.assets.first(where: { $0.placeName != nil }) ?? model.assets.first {
-            model.replaceSelection([hero], focused: hero)
-            model.inspectorVisible = true
-            await settle(1.2)
-            prepareWindow()
-            capture("inspector")
-        }
-
         model.inspectorVisible = false
         model.selectPeople()
         model.highlightedSubjectID = model.subjectClusters.first { !$0.name.isEmpty }?.id ?? model.subjectClusters.first?.id
@@ -52,6 +45,15 @@ enum ScreenshotSession {
         await settle(1.2)
         prepareWindow()
         capture("people")
+
+        model.selectAll()
+        if let hero = model.assets.first(where: { $0.placeName != nil }) ?? model.assets.first {
+            model.replaceSelection([hero], focused: hero)
+            model.inspectorVisible = true
+            await settle(1.4)
+            prepareWindow()
+            capture("inspector")
+        }
 
         watchdog.cancel()
         NSApp.terminate(nil)
@@ -227,7 +229,7 @@ enum ScreenshotSession {
     }
 
     private static func cropSidebar(_ image: CGImage) -> CGImage? {
-        let cropWidth = max(1, min(image.width, Int(Double(image.width) * 0.20)))
+        let cropWidth = max(1, min(image.width, Int(Double(image.width) * 0.30)))
         return image.cropping(to: CGRect(x: 0, y: 0, width: cropWidth, height: image.height))
     }
 

@@ -36,7 +36,7 @@ struct RootView: View {
         .inspector(isPresented: $model.inspectorVisible) {
             InspectorView(model: model)
         }
-        .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
+        .inspectorColumnWidth(min: 220, ideal: 280, max: 340)
         .tint(.accentColor)
         .background {
             ZStack {
