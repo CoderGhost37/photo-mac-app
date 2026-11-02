@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 /// Launched only when `STILLROOM_SCREENSHOTS` is set. Seeds a tiny library and writes window PNGs for CI.
 enum ScreenshotSession {
@@ -25,7 +24,7 @@ enum ScreenshotSession {
         await settle(0.8)
         prepareWindow()
         await settle(0.6)
-        capture("empty-state", model: model)
+        capture("empty-state")
 
         await model.installScreenshotLibrary()
         model.timelineScale = .days
@@ -35,15 +34,15 @@ enum ScreenshotSession {
         await model.waitUntilSettled()
         await settle(1.6)
         prepareWindow()
-        capture("all-photos", model: model)
-        capture("sidebar", model: model)
+        capture("all-photos")
+        capture("sidebar")
 
         if let hero = model.assets.first(where: { $0.placeName != nil }) ?? model.assets.first {
             model.replaceSelection([hero], focused: hero)
             model.inspectorVisible = true
             await settle(1.2)
             prepareWindow()
-            capture("inspector", model: model)
+            capture("inspector")
         }
 
         model.inspectorVisible = false
@@ -52,7 +51,7 @@ enum ScreenshotSession {
         await model.waitUntilSettled()
         await settle(1.2)
         prepareWindow()
-        capture("people", model: model)
+        capture("people")
 
         watchdog.cancel()
         NSApp.terminate(nil)
@@ -125,35 +124,53 @@ enum ScreenshotSession {
     }
 
     @MainActor
-    private static func capture(_ name: String, model: AppModel) {
+    private static func capture(_ name: String) {
         guard let directory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let window = NSApp.windows.first { $0.isVisible && $0.canBecomeMain } ?? NSApp.windows.first { $0.isVisible }
-        var windowData: Data?
-        if let window, let image = windowImage(window), colorVariance(image) > 12 {
-            windowData = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+        var best: (image: CGImage, variance: Double)?
+        for _ in 0..<12 {
+            prepareWindow()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain })
+                ?? NSApp.windows.first(where: \.isVisible) else { continue }
+            window.displayIfNeeded()
+            for image in shotCandidates(window) where !isPlaceholder(image) {
+                let variance = colorVariance(image)
+                if best == nil || variance > best!.variance {
+                    best = (image, variance)
+                }
+            }
+            if let best, best.variance > 8 { break }
         }
-        let rendered = render(model: model)
-        let chosen = larger(windowData, rendered)
+        guard var image = best?.image else {
+            print("screenshot \(name): no window image")
+            fflush(stdout)
+            return
+        }
+        if name == "sidebar" {
+            image = cropSidebar(image) ?? image
+        }
         let url = directory.appendingPathComponent("\(name).png")
-        if let chosen {
-            try? chosen.write(to: url)
-        }
+        guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: url)
+        print("screenshot \(name): \(image.width)x\(image.height) variance \(best?.variance ?? 0)")
+        fflush(stdout)
     }
 
     @MainActor
-    private static func render(model: AppModel) -> Data? {
-        let renderer = ImageRenderer(
-            content: RootView(model: model)
-                .frame(width: 1280, height: 820)
-                .environment(\.colorScheme, .dark)
-        )
-        renderer.scale = 2
-        renderer.proposedSize = ProposedViewSize(width: 1280, height: 820)
-        guard let image = renderer.nsImage,
-              let tiff = image.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+    private static func shotCandidates(_ window: NSWindow) -> [CGImage] {
+        var images: [CGImage] = []
+        if let image = windowImage(window) {
+            images.append(image)
+        }
+        if let view = window.contentView, view.bounds.width > 2, view.bounds.height > 2,
+           let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            if let image = rep.cgImage {
+                images.append(image)
+            }
+        }
+        return images
     }
 
     private static func windowImage(_ window: NSWindow) -> CGImage? {
@@ -164,6 +181,34 @@ enum ScreenshotSession {
             CGWindowID(window.windowNumber),
             [.boundsIgnoreFraming, .bestResolution]
         )
+    }
+
+    /// The offscreen renderer draws a yellow field and a red prohibition mark. Never keep that.
+    private static func isPlaceholder(_ image: CGImage) -> Bool {
+        guard image.width > 32, image.height > 32,
+              let data = image.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else { return true }
+        let length = CFDataGetLength(data)
+        let bytesPerRow = max(image.bytesPerRow, 1)
+        let bytesPerPixel = max(image.bitsPerPixel / 8, 1)
+        func sample(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+            let px = min(max(x, 0), image.width - 1)
+            let py = min(max(y, 0), image.height - 1)
+            let index = py * bytesPerRow + px * bytesPerPixel
+            guard index + 2 < length else { return (0, 0, 0) }
+            return (Int(bytes[index]), Int(bytes[index + 1]), Int(bytes[index + 2]))
+        }
+        func yellow(_ pixel: (Int, Int, Int)) -> Bool {
+            let hi = max(pixel.0, pixel.1, pixel.2)
+            let lo = min(pixel.0, pixel.1, pixel.2)
+            return hi > 200 && lo < 50 && pixel.1 > 150
+        }
+        return yellow(sample(4, 4))
+    }
+
+    private static func cropSidebar(_ image: CGImage) -> CGImage? {
+        let cropWidth = max(1, min(image.width, Int(Double(image.width) * 0.24)))
+        return image.cropping(to: CGRect(x: 0, y: 0, width: cropWidth, height: image.height))
     }
 
     private static func colorVariance(_ image: CGImage) -> Double {
@@ -189,19 +234,6 @@ enum ScreenshotSession {
             index += step
         }
         return sum / count
-    }
-
-    private static func larger(_ lhs: Data?, _ rhs: Data?) -> Data? {
-        switch (lhs, rhs) {
-        case let (left?, right?):
-            return left.count >= right.count ? left : right
-        case let (left?, nil):
-            return left
-        case let (nil, right?):
-            return right
-        case (nil, nil):
-            return nil
-        }
     }
 
     private static func settle(_ seconds: Double) async {
