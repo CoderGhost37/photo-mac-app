@@ -117,6 +117,7 @@ enum Format {
         case .downloads: return "arrow.down.circle"
         case .screenRecordings: return "record.circle"
         case .folder: return "folder"
+        case .captureTool: return "camera.viewfinder"
         }
     }
 

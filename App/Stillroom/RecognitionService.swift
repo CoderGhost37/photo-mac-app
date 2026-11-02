@@ -14,11 +14,17 @@ final class RecognitionService: @unchecked Sendable {
     private var includeVideo = false
     private let home: URL
     private let workDirectory: URL
+    private let pauseReason: @Sendable () -> BackgroundPauseReason?
     var onProgress: @Sendable (String?) -> Void = { _ in }
 
-    init(database: IndexDatabase, home: URL) {
+    init(
+        database: IndexDatabase,
+        home: URL,
+        pauseReason: @escaping @Sendable () -> BackgroundPauseReason? = { nil }
+    ) {
         self.database = database
         self.home = home
+        self.pauseReason = pauseReason
         self.workDirectory = IndexLocation.workDirectory(home: home)
             .appendingPathComponent("Recognition", isDirectory: true)
     }
@@ -61,6 +67,7 @@ final class RecognitionService: @unchecked Sendable {
         guard !ordered.isEmpty else { return }
         var remaining = ordered.count
         for id in ordered {
+            waitWhilePaused()
             if again { break }
             remaining -= 1
             if remaining % 20 == 0 {
@@ -89,6 +96,14 @@ final class RecognitionService: @unchecked Sendable {
             }
         }
         onProgress(nil)
+    }
+
+    private func waitWhilePaused() {
+        while let reason = pauseReason() {
+            if again { return }
+            onProgress(BackgroundPause.message(reason))
+            Thread.sleep(forTimeInterval: 1)
+        }
     }
 
     private func loadEmbedder() -> CoreMLClipEmbedder? {

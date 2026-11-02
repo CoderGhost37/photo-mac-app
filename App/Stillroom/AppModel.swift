@@ -31,12 +31,18 @@ final class AppModel {
     var inspectorVisible = true
     var status = "Opening library…"
     var isIndexing = false
+    private(set) var machinePause: BackgroundPauseReason?
+    var hiddenUnlocked = false
+    private(set) var authenticatingHidden = false
+    private var hiddenActivity: Date?
+    let importSession = DeviceImportSession()
 
     private let database: IndexDatabase?
     private let indexer: Indexer?
     private let recognition: RecognitionService?
     private let understanding: UnderstandingService?
     let thumbnails: ThumbnailService?
+    private let limits: MachineLimits
     private let scanQueue = DispatchQueue(label: "Stillroom.Index", qos: .utility)
     private var watcher: FolderWatcher?
     private var debounce: [String: DispatchWorkItem] = [:]
@@ -84,6 +90,8 @@ final class AppModel {
             return "Highlights"
         case .duplicates:
             return "Duplicates"
+        case .hidden:
+            return "Hidden"
         case .library:
             var parts: [String] = []
             if let selectedSourceID, let source = sources.first(where: { $0.id == selectedSourceID }) {
@@ -111,13 +119,15 @@ final class AppModel {
     }
 
     init() {
+        let limits = MachineLimits()
+        self.limits = limits
         let home = FileManager.default.homeDirectoryForCurrentUser
         do {
             let database = try IndexDatabase(path: IndexLocation.databaseURL(home: home).path)
             self.database = database
             self.indexer = Indexer(database: database, metadataReader: AppleMetadataReader())
-            self.recognition = RecognitionService(database: database, home: home)
-            self.understanding = UnderstandingService(database: database, home: home)
+            self.recognition = RecognitionService(database: database, home: home, pauseReason: { limits.current() })
+            self.understanding = UnderstandingService(database: database, home: home, pauseReason: { limits.current() })
             let cache = ThumbnailCache(directory: IndexLocation.thumbnailDirectory(home: home))
             self.thumbnails = ThumbnailService(cache: cache)
         } catch {
@@ -135,6 +145,8 @@ final class AppModel {
         guard !didStart else { return }
         didStart = true
         guard database != nil else { return }
+        refreshLimits()
+        startLimitTimer()
         do {
             try prepareSources()
         } catch {
@@ -247,6 +259,140 @@ final class AppModel {
         shownStory = nil
         stopStory()
         reload()
+    }
+
+    func selectHidden() {
+        if hiddenUnlocked {
+            showHiddenAlbum()
+            return
+        }
+        authenticatingHidden = true
+        Task {
+            let ok = await HiddenAuthentication.unlock()
+            authenticatingHidden = false
+            if ok {
+                hiddenUnlocked = true
+                hiddenActivity = Date()
+                showHiddenAlbum()
+            } else {
+                status = "Hidden album stayed locked."
+            }
+        }
+    }
+
+    func noteInactive() {
+        guard hiddenUnlocked else { return }
+        guard HiddenLock.shouldLock(
+            inactive: true,
+            authenticating: authenticatingHidden,
+            lastActivity: hiddenActivity,
+            now: Date()
+        ) else { return }
+        lockHidden()
+    }
+
+    func setHidden(_ hidden: Bool, assets: [Asset]) {
+        let targets = assets.isEmpty ? selectedAssets : assets
+        guard let database, !targets.isEmpty else { return }
+        do {
+            try database.setHidden(hidden, assetIDs: targets.map(\.id))
+        } catch {
+            status = error.localizedDescription
+            return
+        }
+        if hidden {
+            status = targets.count == 1 ? "Hidden. The file was not changed." : "Hidden \(targets.count). The files were not changed."
+        } else {
+            status = "Back in the library. The file was not changed."
+        }
+        refreshMemories()
+    }
+
+    func adoptImportFolder(_ url: URL) {
+        guard let database else { return }
+        let path = SourceCatalog.normalizedDirectory(url).path
+        if sources.contains(where: { $0.rootPath == path }) {
+            if let source = sources.first(where: { $0.rootPath == path }) {
+                scheduleScan(source)
+            }
+            return
+        }
+        let bookmark = try? FolderAccess.bookmark(for: url)
+        _ = url.startAccessingSecurityScopedResource()
+        accessedURLs.append(url)
+        let source = SourceCatalog.customFolder(
+            displayName: url.lastPathComponent,
+            rootPath: path,
+            bookmarkData: bookmark
+        )
+        do {
+            try database.save(source: source)
+            sources = try database.sources()
+        } catch {
+            status = error.localizedDescription
+            return
+        }
+        restartWatcher()
+        scheduleScan(source)
+        reload()
+    }
+
+    func importSignatures() -> Set<String> {
+        (try? database?.importSignatures()) ?? []
+    }
+
+    func recordDeviceImports(_ records: [(signature: String, relativePath: String)]) {
+        guard let database, !records.isEmpty else { return }
+        try? database.recordImports(records, at: Date())
+    }
+
+    private func showHiddenAlbum() {
+        browse = .hidden
+        selectedKind = nil
+        selectedSourceID = nil
+        clearPins()
+        hiddenActivity = Date()
+        reload()
+    }
+
+    private func lockHidden() {
+        hiddenUnlocked = false
+        hiddenActivity = nil
+        guard browse == .hidden else { return }
+        browse = .library
+        selectedSourceID = nil
+        selectedKind = nil
+        clearPins()
+        status = "Hidden album locked."
+        reload()
+    }
+
+    func refreshLimits() {
+        let snapshot = PowerMonitor.snapshot()
+        let previous = machinePause
+        limits.update(snapshot)
+        machinePause = limits.current()
+        if let machinePause {
+            status = BackgroundPause.message(machinePause)
+        } else if previous != nil, !isIndexing, !keepStatus {
+            status = "Library is up to date"
+        }
+        if hiddenUnlocked, HiddenLock.shouldLock(
+            inactive: false,
+            authenticating: authenticatingHidden,
+            lastActivity: hiddenActivity,
+            now: Date()
+        ) {
+            lockHidden()
+        }
+    }
+
+    private func startLimitTimer() {
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshLimits()
+            }
+        }
     }
 
     func selectDuplicateGroup(_ id: String) {
@@ -473,6 +619,9 @@ final class AppModel {
         selectedAssets = assets
         selectedAsset = focused ?? assets.last
         selectedAssetID = selectedAsset?.id
+        if browse == .hidden {
+            hiddenActivity = Date()
+        }
     }
 
     func openConvert() {
@@ -480,6 +629,10 @@ final class AppModel {
             convertSession.addAssets(selectedAssets)
         }
         presentedTool = .convert
+    }
+
+    func openImport() {
+        presentedTool = .deviceImport
     }
 
     func openPDF() {
@@ -524,6 +677,10 @@ final class AppModel {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let capture = ScreenshotLocation.current(home: home)
         _ = try database.synchronizeBuiltinSources(homeDirectory: home, captureDirectory: capture)
+        let discovered = CaptureToolLocator.discover(home: home)
+        let roots = (try database.sources()).compactMap(\.rootPath)
+        let tools = CaptureToolPreferences.offering(discovered, existingRoots: roots).map(CaptureToolPreferences.source(for:))
+        try database.synchronizeCaptureTools(tools)
         var stored = try database.sources()
         for index in stored.indices where stored[index].kind == .folder {
             guard let data = stored[index].bookmarkData, let resolved = FolderAccess.resolve(data) else { continue }
@@ -576,7 +733,12 @@ final class AppModel {
                 self?.status = text
             }
         }
+        let limits = self.limits
         scanQueue.async { [weak self] in
+            while let reason = limits.current() {
+                relay.send(BackgroundPause.message(reason))
+                Thread.sleep(forTimeInterval: 1)
+            }
             let group = DispatchGroup()
             group.enter()
             var outcome: Result<ScanStats, Error> = .success(.zero)
@@ -585,9 +747,16 @@ final class AppModel {
                     if source.kind == .photosLibrary {
                         outcome = .success(try await Self.scanPhotos(source: source, indexer: indexer, database: database))
                     } else {
-                        let stats = try await indexer.scan(source) { examined, total in
-                            relay.send("Indexing \(name) · \(examined) of \(total)")
-                        }
+                        let stats = try await indexer.scan(
+                            source,
+                            onProgress: { examined, total in
+                                relay.send("Indexing \(name) · \(examined) of \(total)")
+                            },
+                            onPause: { reason in
+                                relay.send(BackgroundPause.message(reason))
+                            },
+                            pauseReason: { limits.current() }
+                        )
                         outcome = .success(stats)
                     }
                 } catch {
@@ -759,6 +928,21 @@ final class AppModel {
                     }
                     blocks = built
                     assets = built.flatMap(\.assets)
+                case .hidden:
+                    assets = (try? database.fetchAssets(matching: query)) ?? []
+                    blocks = nil
+                }
+            }
+            if browse != .hidden {
+                assets = assets.filter { !$0.isHidden }
+                if blocks != nil {
+                    blocks = blocks?.compactMap { block in
+                        let kept = block.assets.filter { !$0.isHidden }
+                        guard !kept.isEmpty else { return nil }
+                        if browse == .duplicates, kept.count < 2 { return nil }
+                        return GridBlock(id: block.id, title: block.title, assets: kept)
+                    }
+                    assets = blocks?.flatMap(\.assets) ?? assets
                 }
             }
             let refreshed = selectedIDs.compactMap { id in assets.first(where: { $0.id == id }) }
@@ -802,6 +986,9 @@ final class AppModel {
     }
 
     private func makeQuery() -> LibraryQuery {
+        if browse == .hidden {
+            return LibraryQuery(sourceIDs: sources.map(\.id), mediaKind: nil, visibility: .hidden)
+        }
         let enabled = sources.filter(\.enabled).map(\.id)
         if browse != .library {
             return LibraryQuery(sourceIDs: enabled, mediaKind: nil)
@@ -822,6 +1009,7 @@ enum LibraryBrowse: String, Equatable {
     case people
     case highlights
     case duplicates
+    case hidden
 }
 
 struct GridBlock: Equatable, Identifiable {
@@ -833,6 +1021,7 @@ struct GridBlock: Equatable, Identifiable {
 enum WorkspaceTool: String, Identifiable {
     case convert
     case pdf
+    case deviceImport
 
     var id: String { rawValue }
 }

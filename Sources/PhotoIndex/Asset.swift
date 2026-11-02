@@ -32,6 +32,8 @@ public struct Asset: Identifiable, Equatable, Sendable {
     public var focalLength: Double?
     public var fileMTime: Date?
     public var indexedAt: Date?
+    /// Index-only. Hiding does not rename, move, or change the file.
+    public var isHidden: Bool
 
     public init(
         id: String,
@@ -58,7 +60,8 @@ public struct Asset: Identifiable, Equatable, Sendable {
         shutterSpeed: Double? = nil,
         focalLength: Double? = nil,
         fileMTime: Date? = nil,
-        indexedAt: Date? = nil
+        indexedAt: Date? = nil,
+        isHidden: Bool = false
     ) {
         self.id = id
         self.sourceID = sourceID
@@ -85,6 +88,7 @@ public struct Asset: Identifiable, Equatable, Sendable {
         self.focalLength = focalLength
         self.fileMTime = fileMTime
         self.indexedAt = indexedAt
+        self.isHidden = isHidden
     }
 }
 

@@ -11,13 +11,15 @@ let package = Package(
         .library(name: "PhotoIndex", targets: ["PhotoIndex"])
     ],
     dependencies: [
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1")
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1"),
+        .package(url: "https://github.com/the-swift-collective/libwebp.git", from: "1.4.0")
     ],
     targets: [
         .target(
             name: "PhotoIndex",
             dependencies: [
-                .product(name: "GRDB", package: "GRDB.swift")
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "WebP", package: "libwebp")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
