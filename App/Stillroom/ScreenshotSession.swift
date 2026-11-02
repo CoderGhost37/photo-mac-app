@@ -36,7 +36,10 @@ enum ScreenshotSession {
         await settle(1.6)
         prepareWindow()
         capture("all-photos")
+        scrollSidebar(toEnd: true)
+        await settle(0.4)
         capture("sidebar")
+        scrollSidebar(toEnd: false)
 
         model.inspectorVisible = false
         model.selectPeople()
@@ -47,6 +50,8 @@ enum ScreenshotSession {
         capture("people")
 
         model.selectAll()
+        await model.waitUntilSettled()
+        await settle(0.8)
         if let hero = model.assets.first(where: { $0.placeName != nil }) ?? model.assets.first {
             model.replaceSelection([hero], focused: hero)
             model.inspectorVisible = true
@@ -129,6 +134,26 @@ enum ScreenshotSession {
             display: true
         )
         window.makeKeyAndOrderFront(nil)
+    }
+
+    @MainActor
+    private static func scrollSidebar(toEnd: Bool) {
+        guard let content = (NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible })?.contentView else { return }
+        func walk(_ view: NSView) {
+            if let scroll = view as? NSScrollView,
+               scroll.frame.width < 380,
+               scroll.frame.height > 180,
+               let document = scroll.documentView {
+                let visible = scroll.contentView.bounds.height
+                let documentHeight = document.bounds.height
+                let maxOffset = max(0, documentHeight - visible)
+                let y = scroll.contentView.isFlipped ? (toEnd ? maxOffset : 0) : (toEnd ? 0 : maxOffset)
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(content)
     }
 
     @MainActor
