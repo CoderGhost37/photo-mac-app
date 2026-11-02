@@ -117,7 +117,7 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             model.noteInactive()
         }
-        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.powerStateDidChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NSProcessInfoPowerStateDidChangeNotification"))) { _ in
             model.refreshLimits()
         }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in

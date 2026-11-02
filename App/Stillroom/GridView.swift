@@ -44,9 +44,9 @@ struct GridView: View {
                     assets: model.assets,
                     blocks: model.gridBlocks,
                     side: model.thumbnailSide,
-                    thumbnails: thumbnails,
                     selectedIDs: model.selectedAssets.map(\.id),
                     ranksResults: model.isSearching,
+                    thumbnails: thumbnails,
                     onSelect: { model.replaceSelection($0, focused: $1) },
                     onOpen: { model.open($0) },
                     onReveal: { model.reveal($0) },
@@ -179,7 +179,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     let collectionView = NSCollectionView()
     let layout = NSCollectionViewFlowLayout()
     var sections: [DaySection] = []
-    var rendered: [(String, String, Double)] = []
+    var rendered: [String] = []
     var renderedBlocks: [String] = []
     var side: CGFloat = 144
     var selectedIDs: [String] = []
@@ -231,7 +231,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     required init?(coder: NSCoder) { nil }
 
     func apply(assets: [Asset], blocks: [GridBlock]?, side: CGFloat, selectedIDs: [String], ranksResults: Bool) {
-        let next = assets.map { ($0.id, $0.contentHash ?? "", $0.duration ?? -1) }
+        let next = assets.map { "\($0.id)\t\($0.contentHash ?? "")\t\($0.duration ?? -1)" }
         let blockIDs = blocks?.map { "\($0.id):\($0.assets.count)" } ?? []
         let contentChanged = next != rendered || blockIDs != renderedBlocks
         let sideChanged = abs(self.side - side) > 0.5
