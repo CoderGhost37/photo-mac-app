@@ -2,7 +2,7 @@
 
 Stillroom is a native Mac app that shows photos, videos, screenshots, and screen recordings that already live on that Mac. It reads them in place. It does not move, rename, modify, or delete your files, and it does not upload them.
 
-This version is the library, local conversion and PDF tools, and search. It reads files in place, and when you convert or export it writes a new file. Search reads text on the Mac and, if you install the description model, ranks pictures by that description. Nothing is uploaded.
+This version is the library, local conversion and PDF tools, search, a place map, people and pets, highlights, and duplicate groups. It reads files in place, and when you convert or export it writes a new file. Search reads text on the Mac and, if you install the description model, ranks pictures by that description. Faces, pets, labels, and duplicate prints are computed on the Mac. Nothing is uploaded.
 
 ## What it indexes
 
@@ -54,7 +54,7 @@ Stillroom reads text in the background with Vision (`VNRecognizeTextRequest`, ac
 
 Select a result and the inspector draws a box around each matched line. Hover a phrase and that box is the one that stays strong.
 
-Place search uses IPTC sub-location, city, state, and country when ImageIO can read them. Coordinates are not turned into names, and there is no network lookup.
+Place search uses IPTC sub-location, city, state, and country when ImageIO can read them. Coordinates are also turned into a place name with `CLGeocoder`, slowly and cached in the index, so a later search for that name hits. The lookup sends the coordinate to Apple. The photo stays on the Mac. A failed lookup is remembered for 30 days.
 
 ## Describing a picture
 
@@ -74,6 +74,22 @@ Pass `--output` to write that directory somewhere else, including an app-bundle 
 
 The conversion script was not run where this repository was built. There is no Xcode there, so the Core ML programs are untested until you run the script on a Mac.
 
+## Places
+
+The sidebar Map shows every geotagged photo and video. Markers cluster on a grid and show a count. Zooming in uses smaller cells, so a marker splits. Click a marker to limit the grid to those photos. Map tiles come from Apple Maps.
+
+## People and pets
+
+Still photos and screenshots are read with Vision. Faces use `VNGenerateFaceFeaturePrintRequest`. Cats and dogs use `VNRecognizeAnimalsRequest`, then an image feature print of the crop, and are clustered into individual pets when the prints are close. The sidebar lists each group and its count. You can rename a group, merge two groups of the same kind, or remove a photo from a group. Removing a photo does not delete the file, and the photo is not put back into that group on the next pass. Groups stay in the local index.
+
+## Highlights
+
+Stillroom builds stories from the index: For you, On this day, each earlier year on this calendar day, recent days, trips, people, pets, and food. A trip is a run of geotagged photos away from the most common location, close to each other in time and distance. Food comes from Vision labels and, when the description model is installed, from how close a photo is to "a plate of food". Open a story to play it full-window: the right side and the right arrow advance, the left side and the left arrow go back, it advances on its own, and the bars at the top show progress. Shuffle a memory picks a random set, preferring photos older than 30 days. Nothing is written.
+
+## Duplicates
+
+Duplicates, in the media types, groups exact copies by content hash and similar photos by the distance between image feature prints. Each group shows its count. You can open a photo or reveal it in Finder. There is no delete button. Stillroom does not remove files.
+
 ## What this version does not do
 
-Similar-photo grouping, face grouping, highlights, and a hidden album are later work. They are not in this build.
+A hidden album is later work. It is not in this build.

@@ -102,7 +102,15 @@ public final class IndexDatabase: Sendable {
     public func applyChanges(inserted: [Asset], updated: [Asset], deletedIDs: [String]) throws {
         guard !inserted.isEmpty || !updated.isEmpty || !deletedIDs.isEmpty else { return }
         try db.write { database in
-            for asset in inserted + updated {
+            for var asset in inserted + updated {
+                if asset.geocodedPlace?.isEmpty != false,
+                   let existing = try Asset.fetchOne(database, sql: "SELECT * FROM asset WHERE id = ?", arguments: [asset.id]),
+                   existing.latitude == asset.latitude,
+                   existing.longitude == asset.longitude,
+                   let kept = existing.geocodedPlace,
+                   !kept.isEmpty {
+                    asset.geocodedPlace = kept
+                }
                 try asset.save(database)
                 try upsertKeyword(database, asset: asset)
             }
@@ -291,6 +299,11 @@ public final class IndexDatabase: Sendable {
                 try database.execute(sql: statement)
             }
         }
+        migrator.registerMigration("v3-memory") { database in
+            for statement in MemorySchema.statements {
+                try database.execute(sql: statement)
+            }
+        }
         return migrator
     }
 }
@@ -355,6 +368,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         latitude = row["latitude"]
         longitude = row["longitude"]
         placeName = row["placeName"]
+        geocodedPlace = row["geocodedPlace"]
         contentHash = row["contentHash"]
         cameraMake = row["cameraMake"]
         cameraModel = row["cameraModel"]
@@ -382,6 +396,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         container["latitude"] = latitude
         container["longitude"] = longitude
         container["placeName"] = placeName
+        container["geocodedPlace"] = geocodedPlace
         container["contentHash"] = contentHash
         container["cameraMake"] = cameraMake
         container["cameraModel"] = cameraModel

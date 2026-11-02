@@ -9,16 +9,36 @@ struct RootView: View {
             SidebarView(model: model)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 320)
         } detail: {
-            HStack(spacing: 0) {
-                GridView(model: model)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if model.inspectorVisible {
+            VStack(spacing: 0) {
+                if model.browse == .places, !model.isSearching {
+                    if model.mapPoints.isEmpty {
+                        Text("No geotagged photos yet.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 180)
+                    } else {
+                        PlacesMapView(points: model.mapPoints) { ids in
+                            model.selectPlaceCluster(ids)
+                        }
+                        .frame(height: 280)
+                    }
                     Divider()
-                    InspectorView(model: model)
-                        .frame(width: 300)
+                }
+                HStack(spacing: 0) {
+                    GridView(model: model)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if model.inspectorVisible {
+                        Divider()
+                        InspectorView(model: model)
+                            .frame(width: 300)
+                    }
                 }
             }
             .background(Palette.canvasColor)
+            .overlay {
+                if let story = model.playingStory {
+                    HighlightPlayback(model: model, story: story)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     HStack(spacing: 6) {

@@ -20,11 +20,29 @@ struct GridView: View {
             .padding(.top, 16)
             .padding(.bottom, 8)
 
+            if model.browse == .duplicates, !model.isSearching {
+                Text("View only. Nothing is deleted. Use Reveal in Finder to see a file on disk.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+            }
+            if model.browse == .places, model.placeMemberIDs != nil, !model.isSearching {
+                Button("Show every place") {
+                    model.selectPlaces()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.accentColor)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+            }
+
             if model.matchedCount == 0 {
                 empty
             } else if let thumbnails = model.thumbnails {
                 AssetCollection(
                     assets: model.assets,
+                    blocks: model.gridBlocks,
                     side: model.thumbnailSide,
                     thumbnails: thumbnails,
                     selectedIDs: model.selectedAssets.map(\.id),
@@ -68,8 +86,15 @@ struct GridView: View {
     private var emptyTitle: String {
         if model.isSearching { return "Nothing matched" }
         if model.isIndexing { return "Indexing…" }
-        if model.counts.enabledTotal == 0 { return "Nothing here yet" }
-        return "Nothing in this view"
+        switch model.browse {
+        case .places: return "No places yet"
+        case .people: return model.selectedSubjectID == nil ? "People and pets" : "Nothing in this group"
+        case .highlights: return "Highlights"
+        case .duplicates: return "No duplicates"
+        case .library:
+            if model.counts.enabledTotal == 0 { return "Nothing here yet" }
+            return "Nothing in this view"
+        }
     }
 
     private var emptyDetail: String {
@@ -79,10 +104,24 @@ struct GridView: View {
             }
             return "Nothing matched the text. To search by describing a picture, run Scripts/fetch-clip.sh once on this Mac. Stillroom does not download the model."
         }
-        if model.counts.enabledTotal == 0 {
-            return "Turn on Screenshots, Downloads, or the Photos library, or add a folder. Stillroom reads files where they are."
+        switch model.browse {
+        case .places:
+            return "Geotagged photos show up on the map. Stillroom reads coordinates already in the file and asks Apple for a place name."
+        case .people:
+            if model.selectedSubjectID == nil {
+                return "Faces and pets are grouped on this Mac. Choose one in the sidebar. Nothing is uploaded."
+            }
+            return "This group is empty. The photos are still in the library."
+        case .highlights:
+            return "Choose a highlight in the sidebar, or shuffle a memory. Playback stays on this Mac."
+        case .duplicates:
+            return "Exact copies share a file hash. Similar photos appear after this Mac reads them. Nothing is deleted."
+        case .library:
+            if model.counts.enabledTotal == 0 {
+                return "Turn on Screenshots, Downloads, or the Photos library, or add a folder. Stillroom reads files where they are."
+            }
+            return "Try another media type or source. The files themselves are unchanged."
         }
-        return "Try another media type or source. The files themselves are unchanged."
     }
 }
 
@@ -94,6 +133,7 @@ private struct DaySection {
 
 private struct AssetCollection: NSViewRepresentable {
     var assets: [Asset]
+    var blocks: [GridBlock]?
     var side: Double
     var selectedIDs: [String]
     var ranksResults: Bool
@@ -123,7 +163,7 @@ private struct AssetCollection: NSViewRepresentable {
         browser.onReveal = onReveal
         browser.onConvert = onConvert
         browser.onPDF = onPDF
-        browser.apply(assets: assets, side: CGFloat(side), selectedIDs: selectedIDs, ranksResults: ranksResults)
+        browser.apply(assets: assets, blocks: blocks, side: CGFloat(side), selectedIDs: selectedIDs, ranksResults: ranksResults)
     }
 }
 
@@ -133,6 +173,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     let layout = NSCollectionViewFlowLayout()
     var sections: [DaySection] = []
     var rendered: [(String, String, Double)] = []
+    var renderedBlocks: [String] = []
     var side: CGFloat = 144
     var selectedIDs: [String] = []
     var ranksResults = false
@@ -181,9 +222,10 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
 
     required init?(coder: NSCoder) { nil }
 
-    func apply(assets: [Asset], side: CGFloat, selectedIDs: [String], ranksResults: Bool) {
+    func apply(assets: [Asset], blocks: [GridBlock]?, side: CGFloat, selectedIDs: [String], ranksResults: Bool) {
         let next = assets.map { ($0.id, $0.contentHash ?? "", $0.duration ?? -1) }
-        let contentChanged = next != rendered
+        let blockIDs = blocks?.map { "\($0.id):\($0.assets.count)" } ?? []
+        let contentChanged = next != rendered || blockIDs != renderedBlocks
         let sideChanged = abs(self.side - side) > 0.5
         let modeChanged = self.ranksResults != ranksResults
         self.selectedIDs = selectedIDs
@@ -191,9 +233,14 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
         self.ranksResults = ranksResults
         if contentChanged || sideChanged || modeChanged {
             rendered = next
-            sections = ranksResults
-                ? [DaySection(id: "results", title: "Best matches", assets: assets)]
-                : group(assets)
+            renderedBlocks = blockIDs
+            if let blocks {
+                sections = blocks.map { DaySection(id: $0.id, title: $0.title, assets: $0.assets) }
+            } else if ranksResults {
+                sections = [DaySection(id: "results", title: "Best matches", assets: assets)]
+            } else {
+                sections = group(assets)
+            }
             layout.itemSize = NSSize(width: side, height: side)
             collectionView.reloadData()
             let photoIDs = assets.prefix(80).compactMap(\.photosLocalIdentifier)

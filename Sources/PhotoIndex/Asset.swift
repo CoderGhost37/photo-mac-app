@@ -18,8 +18,10 @@ public struct Asset: Identifiable, Equatable, Sendable {
     public var duration: TimeInterval?
     public var latitude: Double?
     public var longitude: Double?
-    /// City, region, or country already stored in the file. Nothing is looked up over the network.
+    /// City, region, or country already stored in the file.
     public var placeName: String?
+    /// Place name from a cached reverse geocode of the coordinates. Nil until that lookup runs.
+    public var geocodedPlace: String?
     public var contentHash: String?
     public var cameraMake: String?
     public var cameraModel: String?
@@ -46,6 +48,7 @@ public struct Asset: Identifiable, Equatable, Sendable {
         latitude: Double?,
         longitude: Double?,
         placeName: String? = nil,
+        geocodedPlace: String? = nil,
         contentHash: String?,
         cameraMake: String? = nil,
         cameraModel: String? = nil,
@@ -71,6 +74,7 @@ public struct Asset: Identifiable, Equatable, Sendable {
         self.latitude = latitude
         self.longitude = longitude
         self.placeName = placeName
+        self.geocodedPlace = geocodedPlace
         self.contentHash = contentHash
         self.cameraMake = cameraMake
         self.cameraModel = cameraModel
