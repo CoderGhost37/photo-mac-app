@@ -17,6 +17,14 @@ struct StillroomApp: App {
                     model.addFolder()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Convert…") {
+                    model.openConvert()
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                Button("PDF…") {
+                    model.openPDF()
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
             }
         }
     }

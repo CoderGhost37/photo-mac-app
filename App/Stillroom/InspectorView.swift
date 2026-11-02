@@ -16,6 +16,11 @@ struct InspectorView: View {
                             .font(.headline)
                             .foregroundStyle(Palette.inkColor)
                             .textSelection(.enabled)
+                        if model.selectedAssets.count > 1 {
+                            Text("\(Format.count(model.selectedAssets.count)) selected")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         facts(asset)
                         actions(asset)
                     }
@@ -95,12 +100,18 @@ struct InspectorView: View {
     }
 
     private func actions(_ asset: Asset) -> some View {
-        HStack(spacing: 8) {
-            Button("Open") { model.open(asset) }
-            if asset.filePath != nil {
-                Button("Reveal in Finder") { model.reveal(asset) }
-            } else {
-                Button("Open Photos") { model.openPhotosApp() }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button("Open") { model.open(asset) }
+                if asset.filePath != nil {
+                    Button("Reveal in Finder") { model.reveal(asset) }
+                } else {
+                    Button("Open Photos") { model.openPhotosApp() }
+                }
+            }
+            HStack(spacing: 8) {
+                Button("Convert") { model.openConvert() }
+                Button("PDF") { model.openPDF() }
             }
         }
         .controlSize(.small)

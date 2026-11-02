@@ -33,6 +33,49 @@ enum PhotosLibraryClient {
         PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil).firstObject
     }
 
+    /// Copies one library original into `directory`. The library itself is not changed.
+    /// Network access stays off, so a photo that is only in iCloud is not downloaded.
+    static func exportOriginal(localIdentifier: String, to directory: URL) async throws -> URL {
+        guard let asset = asset(localIdentifier: localIdentifier) else {
+            throw ConvertFailure.libraryUnreadable("a Photos item")
+        }
+        let resources = PHAssetResource.assetResources(for: asset)
+        let order: [PHAssetResourceType] = [
+            .photo, .video, .fullSizePhoto, .fullSizeVideo, .alternatePhoto, .fullSizePairedVideo
+        ]
+        let resource = order.compactMap { type in resources.first { $0.type == type } }.first ?? resources.first
+        guard let resource else { throw ConvertFailure.libraryUnreadable("a Photos item") }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let ext = URL(fileURLWithPath: resource.originalFilename).pathExtension
+        var reserved = Set<String>()
+        let path = try OutputNamer.allocate(
+            displayName: resource.originalFilename,
+            sourcePath: nil,
+            fileExtension: ext.isEmpty ? "dat" : ext,
+            directory: directory.path,
+            reserved: &reserved,
+            exists: { FileManager.default.fileExists(atPath: $0) }
+        ).get()
+        let url = URL(fileURLWithPath: path)
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = false
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: options) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw ConvertFailure.libraryUnreadable(resource.originalFilename)
+        }
+        return url
+    }
+
     private static func makeAsset(_ item: PHAsset, indexedAt: Date) -> Asset {
         let kind: MediaKind
         if item.mediaSubtypes.contains(.photoScreenshot) {

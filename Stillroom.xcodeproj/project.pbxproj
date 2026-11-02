@@ -19,6 +19,9 @@
 		A10000000000000000000048 /* PhotosLibraryClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000028 /* PhotosLibraryClient.swift */; };
 		A10000000000000000000049 /* FolderAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* FolderAccess.swift */; };
 		A1000000000000000000004A /* Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002A /* Palette.swift */; };
+		A1000000000000000000004B /* ConvertPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ConvertPanel.swift */; };
+		A1000000000000000000004C /* PDFPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* PDFPanel.swift */; };
+		A1000000000000000000004D /* ContinuityScan.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* ContinuityScan.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +39,9 @@
 		A10000000000000000000028 /* PhotosLibraryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryClient.swift; sourceTree = "<group>"; };
 		A10000000000000000000029 /* FolderAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderAccess.swift; sourceTree = "<group>"; };
 		A1000000000000000000002A /* Palette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Palette.swift; sourceTree = "<group>"; };
+		A1000000000000000000002B /* ConvertPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvertPanel.swift; sourceTree = "<group>"; };
+		A1000000000000000000002C /* PDFPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPanel.swift; sourceTree = "<group>"; };
+		A1000000000000000000002D /* ContinuityScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuityScan.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -71,6 +77,9 @@
 				A10000000000000000000028 /* PhotosLibraryClient.swift */,
 				A10000000000000000000029 /* FolderAccess.swift */,
 				A1000000000000000000002A /* Palette.swift */,
+				A1000000000000000000002B /* ConvertPanel.swift */,
+				A1000000000000000000002C /* PDFPanel.swift */,
+				A1000000000000000000002D /* ContinuityScan.swift */,
 				A10000000000000000000013 /* Assets.xcassets */,
 				A10000000000000000000015 /* Info.plist */,
 				A10000000000000000000016 /* Stillroom.entitlements */,
@@ -166,6 +175,9 @@
 				A10000000000000000000048 /* PhotosLibraryClient.swift in Sources */,
 				A10000000000000000000049 /* FolderAccess.swift in Sources */,
 				A1000000000000000000004A /* Palette.swift in Sources */,
+				A1000000000000000000004B /* ConvertPanel.swift in Sources */,
+				A1000000000000000000004C /* PDFPanel.swift in Sources */,
+				A1000000000000000000004D /* ContinuityScan.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
