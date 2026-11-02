@@ -243,7 +243,7 @@ final class DeviceImportSession: NSObject {
     }
 
     private func identity(_ camera: ICCameraDevice) -> String {
-        if let uuid = camera.uuidString, !uuid.isEmpty { return uuid }
+        if let persistent = camera.persistentIDString, !persistent.isEmpty { return persistent }
         if let name = camera.name, !name.isEmpty { return name }
         return "camera"
     }

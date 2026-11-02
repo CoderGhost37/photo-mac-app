@@ -113,18 +113,22 @@ public enum DeviceImportPlan {
     public static func existingSizes(in root: URL) -> [String: Int64] {
         let rootPath = SourceCatalog.normalizedDirectory(root).path
         var sizes: [String: Int64] = [:]
-        guard let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return sizes
-        }
-        for case let url as URL in enumerator {
-            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-            guard values?.isRegularFile == true else { continue }
-            guard let relative = FileCatalog.relativePath(file: url.path, root: rootPath) else { continue }
-            sizes[relative] = Int64(values?.fileSize ?? 0)
+        var pending = [rootPath]
+        let fileManager = FileManager.default
+        while let directory = pending.popLast() {
+            guard let names = try? fileManager.contentsOfDirectory(atPath: directory) else { continue }
+            for name in names where !name.hasPrefix(".") {
+                let path = (directory as NSString).appendingPathComponent(name)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else { continue }
+                if isDirectory.boolValue {
+                    pending.append(path)
+                    continue
+                }
+                guard let relative = FileCatalog.relativePath(file: path, root: rootPath) else { continue }
+                let attributes = try? fileManager.attributesOfItem(atPath: path)
+                sizes[relative] = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+            }
         }
         return sizes
     }
