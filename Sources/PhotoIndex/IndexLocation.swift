@@ -18,4 +18,16 @@ public enum IndexLocation {
     public static func thumbnailDirectory(home: URL) -> URL {
         directory(home: home).appendingPathComponent("Thumbnails", isDirectory: true)
     }
+
+    public static func workDirectory(home: URL) -> URL {
+        directory(home: home).appendingPathComponent("Work", isDirectory: true)
+    }
+
+    public static func scanDirectory(home: URL) -> URL {
+        workDirectory(home: home).appendingPathComponent("Scans", isDirectory: true)
+    }
+
+    public static func temporaryExportDirectory(home: URL) -> URL {
+        workDirectory(home: home).appendingPathComponent("Exports", isDirectory: true)
+    }
 }

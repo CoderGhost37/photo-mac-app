@@ -12,7 +12,7 @@ struct GridView: View {
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(Palette.inkColor)
                 Spacer()
-                Text("\(Format.count(model.matchedCount)) · newest first")
+                Text(countLine)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -28,9 +28,12 @@ struct GridView: View {
                     side: model.thumbnailSide,
                     selectedID: model.selectedAssetID,
                     thumbnails: thumbnails,
-                    onSelect: { model.select(asset: $0) },
+                    selectedIDs: model.selectedAssets.map(\.id),
+                    onSelect: { model.replaceSelection($0, focused: $1) },
                     onOpen: { model.open($0) },
-                    onReveal: { model.reveal($0) }
+                    onReveal: { model.reveal($0) },
+                    onConvert: { model.showConvert($0) },
+                    onPDF: { model.showPDF($0) }
                 )
                 .id(model.queryToken)
             }
@@ -50,6 +53,14 @@ struct GridView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var countLine: String {
+        var line = "\(Format.count(model.matchedCount)) · newest first"
+        if model.selectedAssets.count > 1 {
+            line += " · \(Format.count(model.selectedAssets.count)) selected"
+        }
+        return line
     }
 
     private var emptyTitle: String {
@@ -75,11 +86,13 @@ private struct DaySection {
 private struct AssetCollection: NSViewRepresentable {
     var assets: [Asset]
     var side: Double
-    var selectedID: String?
+    var selectedIDs: [String]
     var thumbnails: ThumbnailService
-    var onSelect: (Asset) -> Void
+    var onSelect: ([Asset], Asset?) -> Void
     var onOpen: (Asset) -> Void
     var onReveal: (Asset) -> Void
+    var onConvert: (Asset) -> Void
+    var onPDF: (Asset) -> Void
 
     func makeNSView(context: Context) -> GridBrowser {
         let browser = GridBrowser()
@@ -87,6 +100,8 @@ private struct AssetCollection: NSViewRepresentable {
         browser.onSelect = onSelect
         browser.onOpen = onOpen
         browser.onReveal = onReveal
+        browser.onConvert = onConvert
+        browser.onPDF = onPDF
         return browser
     }
 
@@ -95,7 +110,9 @@ private struct AssetCollection: NSViewRepresentable {
         browser.onSelect = onSelect
         browser.onOpen = onOpen
         browser.onReveal = onReveal
-        browser.apply(assets: assets, side: CGFloat(side), selectedID: selectedID)
+        browser.onConvert = onConvert
+        browser.onPDF = onPDF
+        browser.apply(assets: assets, side: CGFloat(side), selectedIDs: selectedIDs)
     }
 }
 
@@ -106,12 +123,14 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     var sections: [DaySection] = []
     var rendered: [(String, String, Double)] = []
     var side: CGFloat = 144
-    var selectedID: String?
+    var selectedIDs: [String] = []
     var restoringSelection = false
     var thumbnails: ThumbnailService?
-    var onSelect: ((Asset) -> Void)?
+    var onSelect: (([Asset], Asset?) -> Void)?
     var onOpen: ((Asset) -> Void)?
     var onReveal: ((Asset) -> Void)?
+    var onConvert: ((Asset) -> Void)?
+    var onPDF: ((Asset) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -125,7 +144,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.isSelectable = true
-        collectionView.allowsMultipleSelection = false
+        collectionView.allowsMultipleSelection = true
         collectionView.backgroundColors = [Palette.canvas]
         collectionView.register(AssetItem.self, forItemWithIdentifier: AssetItem.reuseID)
         collectionView.register(
@@ -150,11 +169,11 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
 
     required init?(coder: NSCoder) { nil }
 
-    func apply(assets: [Asset], side: CGFloat, selectedID: String?) {
+    func apply(assets: [Asset], side: CGFloat, selectedIDs: [String]) {
         let next = assets.map { ($0.id, $0.contentHash ?? "", $0.duration ?? -1) }
         let contentChanged = next != rendered
         let sideChanged = abs(self.side - side) > 0.5
-        self.selectedID = selectedID
+        self.selectedIDs = selectedIDs
         self.side = side
         if contentChanged || sideChanged {
             rendered = next
@@ -183,6 +202,8 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
         item.side = side
         item.onOpen = { [weak self] in self?.onOpen?($0) }
         item.onReveal = { [weak self] in self?.onReveal?($0) }
+        item.onConvert = { [weak self] in self?.onConvert?($0) }
+        item.onPDF = { [weak self] in self?.onPDF?($0) }
         item.configure(asset, thumbnails: thumbnails, scale: window?.backingScaleFactor ?? 2)
         return item
     }
@@ -202,16 +223,51 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     }
 
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-        guard !restoringSelection, let indexPath = indexPaths.first else { return }
-        let asset = sections[indexPath.section].assets[indexPath.item]
-        selectedID = asset.id
-        onSelect?(asset)
+        guard !restoringSelection else { return }
+        publishSelection(focused: indexPaths.first)
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+        guard !restoringSelection else { return }
+        publishSelection(focused: nil)
+    }
+
+    private func publishSelection(focused indexPath: IndexPath?) {
+        let assets = selectedAssetsInOrder()
+        selectedIDs = assets.map(\.id)
+        let hint = indexPath.flatMap { asset(at: $0) }
+        let focused = hint.flatMap { item in assets.first { $0.id == item.id } } ?? assets.last
+        onSelect?(assets, focused)
+    }
+
+    private func selectedAssetsInOrder() -> [Asset] {
+        let chosen = Set(collectionView.selectionIndexPaths)
+        var assets: [Asset] = []
+        for (section, group) in sections.enumerated() {
+            for (item, asset) in group.assets.enumerated() where chosen.contains(IndexPath(item: item, section: section)) {
+                assets.append(asset)
+            }
+        }
+        return assets
+    }
+
+    private func asset(at indexPath: IndexPath) -> Asset? {
+        guard indexPath.section < sections.count, indexPath.item < sections[indexPath.section].assets.count else { return nil }
+        return sections[indexPath.section].assets[indexPath.item]
     }
 
     private func restoreSelection() {
-        guard let selectedID, let indexPath = indexPath(for: selectedID) else { return }
+        var paths = Set<IndexPath>()
+        for id in selectedIDs {
+            if let indexPath = indexPath(for: id) {
+                paths.insert(indexPath)
+            }
+        }
         restoringSelection = true
-        collectionView.selectItems(at: [indexPath], scrollPosition: [])
+        collectionView.deselectItems(at: collectionView.selectionIndexPaths)
+        if !paths.isEmpty {
+            collectionView.selectItems(at: paths, scrollPosition: [])
+        }
         restoringSelection = false
     }
 
@@ -267,6 +323,8 @@ private final class AssetItem: NSCollectionViewItem {
     var side: CGFloat = 144
     var onOpen: ((Asset) -> Void)?
     var onReveal: ((Asset) -> Void)?
+    var onConvert: ((Asset) -> Void)?
+    var onPDF: ((Asset) -> Void)?
 
     override func loadView() {
         let root = NSView()
@@ -358,9 +416,26 @@ private final class AssetItem: NSCollectionViewItem {
         open.target = self
         let reveal = NSMenuItem(title: "Reveal in Finder", action: #selector(revealItem), keyEquivalent: "")
         reveal.target = self
+        let convert = NSMenuItem(title: "Convert…", action: #selector(convertItem), keyEquivalent: "")
+        convert.target = self
+        let pdf = NSMenuItem(title: "Add to PDF…", action: #selector(pdfItem), keyEquivalent: "")
+        pdf.target = self
         menu.addItem(open)
         menu.addItem(reveal)
+        menu.addItem(.separator())
+        menu.addItem(convert)
+        menu.addItem(pdf)
         return menu
+    }
+
+    @objc private func convertItem() {
+        guard let asset else { return }
+        onConvert?(asset)
+    }
+
+    @objc private func pdfItem() {
+        guard let asset else { return }
+        onPDF?(asset)
     }
 
     @objc private func openItem() {

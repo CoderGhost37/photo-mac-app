@@ -38,6 +38,22 @@ struct RootView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
+                        model.openConvert()
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .help("Convert selected files, or drop files in the panel")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        model.openPDF()
+                    } label: {
+                        Image(systemName: "doc.richtext")
+                    }
+                    .help("Make a PDF from the selection, or drop files in the panel")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
                         model.inspectorVisible.toggle()
                     } label: {
                         Image(systemName: "sidebar.trailing")
@@ -47,5 +63,13 @@ struct RootView: View {
             }
         }
         .navigationTitle(model.filterTitle)
+        .sheet(item: $model.presentedTool) { tool in
+            switch tool {
+            case .convert:
+                ConvertPanel(model: model, session: model.convertSession)
+            case .pdf:
+                PDFPanel(model: model, session: model.pdfSession)
+            }
+        }
     }
 }

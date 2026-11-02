@@ -31,6 +31,10 @@ final class AppModel {
     private var launchError: String?
     private var keepStatus = false
     var selectedAssetID: String?
+    private(set) var selectedAssets: [Asset] = []
+    var presentedTool: WorkspaceTool?
+    let convertSession = ConvertSession()
+    let pdfSession = PDFSession()
 
     var filterTitle: String {
         var parts: [String] = []
@@ -170,17 +174,49 @@ final class AppModel {
         if selectedSourceID == source.id {
             selectedSourceID = nil
         }
-        if selectedAsset?.sourceID == source.id {
-            selectedAssetID = nil
-            selectedAsset = nil
+        selectedAssets.removeAll { $0.sourceID == source.id }
+        if selectedAsset?.sourceID == source.id || selectedAssets.isEmpty {
+            selectedAsset = selectedAssets.last
+            selectedAssetID = selectedAsset?.id
         }
         restartWatcher()
         reload()
     }
 
     func select(asset: Asset) {
-        selectedAssetID = asset.id
-        selectedAsset = asset
+        replaceSelection([asset], focused: asset)
+    }
+
+    func replaceSelection(_ assets: [Asset], focused: Asset?) {
+        selectedAssets = assets
+        selectedAsset = focused ?? assets.last
+        selectedAssetID = selectedAsset?.id
+    }
+
+    func openConvert() {
+        if !selectedAssets.isEmpty {
+            convertSession.addAssets(selectedAssets)
+        }
+        presentedTool = .convert
+    }
+
+    func openPDF() {
+        if !selectedAssets.isEmpty {
+            pdfSession.addAssets(selectedAssets)
+        }
+        presentedTool = .pdf
+    }
+
+    func showConvert(_ asset: Asset) {
+        let group = selectedAssets.contains(where: { $0.id == asset.id }) ? selectedAssets : [asset]
+        convertSession.addAssets(group)
+        presentedTool = .convert
+    }
+
+    func showPDF(_ asset: Asset) {
+        let group = selectedAssets.contains(where: { $0.id == asset.id }) ? selectedAssets : [asset]
+        pdfSession.addAssets(group)
+        presentedTool = .pdf
     }
 
     func open(_ asset: Asset) {
@@ -325,25 +361,22 @@ final class AppModel {
         let generation = reloadGeneration
         let query = makeQuery()
         let enabled = sources.filter(\.enabled).map(\.id)
-        let selectedID = selectedAssetID
+        let selectedIDs = selectedAssets.map(\.id)
+        let focusedID = selectedAssetID
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let assets = (try? database.fetchAssets(matching: query)) ?? []
             let total = (try? database.countAssets(matching: query)) ?? assets.count
             let counts = (try? database.libraryCounts(enabledSourceIDs: enabled)) ?? .empty
-            let selected = selectedID.flatMap { try? database.asset(id: $0) }
+            let refreshed = selectedIDs.compactMap { id in assets.first(where: { $0.id == id }) }
+            let focused = refreshed.first { $0.id == focusedID } ?? refreshed.last
             Task { @MainActor in
                 guard let self, generation == self.reloadGeneration else { return }
                 self.assets = assets
                 self.matchedCount = total
                 self.counts = counts
-                if let selected, query.sourceIDs.contains(selected.sourceID),
-                   query.mediaKind == nil || query.mediaKind == selected.mediaKind {
-                    self.selectedAsset = selected
-                    self.selectedAssetID = selected.id
-                } else if selectedID != nil, !assets.contains(where: { $0.id == selectedID }) {
-                    self.selectedAsset = nil
-                    self.selectedAssetID = nil
-                }
+                self.selectedAssets = refreshed
+                self.selectedAsset = focused
+                self.selectedAssetID = focused?.id
             }
         }
     }
@@ -358,6 +391,13 @@ final class AppModel {
         }
         return LibraryQuery(sourceIDs: sourceIDs, mediaKind: selectedKind)
     }
+}
+
+enum WorkspaceTool: String, Identifiable {
+    case convert
+    case pdf
+
+    var id: String { rawValue }
 }
 
 private final class StatusRelay: @unchecked Sendable {
