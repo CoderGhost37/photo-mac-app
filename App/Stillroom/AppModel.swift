@@ -882,8 +882,8 @@ final class AppModel {
         let duplicateID = selectedDuplicateID
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let counts = (try? database.libraryCounts(enabledSourceIDs: enabled)) ?? .empty
-            let assets: [Asset]
-            let blocks: [GridBlock]?
+            var assets: [Asset]
+            var blocks: [GridBlock]?
             if plan.isActive {
                 if plan.matchesNothing {
                     assets = []
