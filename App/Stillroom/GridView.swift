@@ -8,7 +8,7 @@ struct GridView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text(model.filterTitle)
+                Text(model.isSearching ? "Search" : model.filterTitle)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(Palette.inkColor)
                 Spacer()
@@ -26,9 +26,9 @@ struct GridView: View {
                 AssetCollection(
                     assets: model.assets,
                     side: model.thumbnailSide,
-                    selectedID: model.selectedAssetID,
                     thumbnails: thumbnails,
                     selectedIDs: model.selectedAssets.map(\.id),
+                    ranksResults: model.isSearching,
                     onSelect: { model.replaceSelection($0, focused: $1) },
                     onOpen: { model.open($0) },
                     onReveal: { model.reveal($0) },
@@ -56,7 +56,9 @@ struct GridView: View {
     }
 
     private var countLine: String {
-        var line = "\(Format.count(model.matchedCount)) · newest first"
+        var line = model.isSearching
+            ? "\(Format.count(model.matchedCount)) results"
+            : "\(Format.count(model.matchedCount)) · newest first"
         if model.selectedAssets.count > 1 {
             line += " · \(Format.count(model.selectedAssets.count)) selected"
         }
@@ -64,12 +66,19 @@ struct GridView: View {
     }
 
     private var emptyTitle: String {
+        if model.isSearching { return "Nothing matched" }
         if model.isIndexing { return "Indexing…" }
         if model.counts.enabledTotal == 0 { return "Nothing here yet" }
         return "Nothing in this view"
     }
 
     private var emptyDetail: String {
+        if model.isSearching {
+            if model.smartSearchReady {
+                return "Nothing in this view is close to that. Try a file name, a place, a date, or words written in the picture."
+            }
+            return "Nothing matched the text. To search by describing a picture, run Scripts/fetch-clip.sh once on this Mac. Stillroom does not download the model."
+        }
         if model.counts.enabledTotal == 0 {
             return "Turn on Screenshots, Downloads, or the Photos library, or add a folder. Stillroom reads files where they are."
         }
@@ -87,6 +96,7 @@ private struct AssetCollection: NSViewRepresentable {
     var assets: [Asset]
     var side: Double
     var selectedIDs: [String]
+    var ranksResults: Bool
     var thumbnails: ThumbnailService
     var onSelect: ([Asset], Asset?) -> Void
     var onOpen: (Asset) -> Void
@@ -102,6 +112,7 @@ private struct AssetCollection: NSViewRepresentable {
         browser.onReveal = onReveal
         browser.onConvert = onConvert
         browser.onPDF = onPDF
+        browser.ranksResults = ranksResults
         return browser
     }
 
@@ -112,7 +123,7 @@ private struct AssetCollection: NSViewRepresentable {
         browser.onReveal = onReveal
         browser.onConvert = onConvert
         browser.onPDF = onPDF
-        browser.apply(assets: assets, side: CGFloat(side), selectedIDs: selectedIDs)
+        browser.apply(assets: assets, side: CGFloat(side), selectedIDs: selectedIDs, ranksResults: ranksResults)
     }
 }
 
@@ -124,6 +135,7 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
     var rendered: [(String, String, Double)] = []
     var side: CGFloat = 144
     var selectedIDs: [String] = []
+    var ranksResults = false
     var restoringSelection = false
     var thumbnails: ThumbnailService?
     var onSelect: (([Asset], Asset?) -> Void)?
@@ -169,15 +181,19 @@ private final class GridBrowser: NSView, NSCollectionViewDataSource, NSCollectio
 
     required init?(coder: NSCoder) { nil }
 
-    func apply(assets: [Asset], side: CGFloat, selectedIDs: [String]) {
+    func apply(assets: [Asset], side: CGFloat, selectedIDs: [String], ranksResults: Bool) {
         let next = assets.map { ($0.id, $0.contentHash ?? "", $0.duration ?? -1) }
         let contentChanged = next != rendered
         let sideChanged = abs(self.side - side) > 0.5
+        let modeChanged = self.ranksResults != ranksResults
         self.selectedIDs = selectedIDs
         self.side = side
-        if contentChanged || sideChanged {
+        self.ranksResults = ranksResults
+        if contentChanged || sideChanged || modeChanged {
             rendered = next
-            sections = group(assets)
+            sections = ranksResults
+                ? [DaySection(id: "results", title: "Best matches", assets: assets)]
+                : group(assets)
             layout.itemSize = NSSize(width: side, height: side)
             collectionView.reloadData()
             let photoIDs = assets.prefix(80).compactMap(\.photosLocalIdentifier)

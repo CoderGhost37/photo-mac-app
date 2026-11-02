@@ -118,6 +118,7 @@ public struct Indexer: Sendable {
             duration: metadata.duration,
             latitude: metadata.latitude,
             longitude: metadata.longitude,
+            placeName: metadata.placeName,
             contentHash: hash,
             cameraMake: metadata.cameraMake,
             cameraModel: metadata.cameraModel,

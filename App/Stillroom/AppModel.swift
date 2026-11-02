@@ -20,6 +20,7 @@ final class AppModel {
 
     private let database: IndexDatabase?
     private let indexer: Indexer?
+    private let recognition: RecognitionService?
     let thumbnails: ThumbnailService?
     private let scanQueue = DispatchQueue(label: "Stillroom.Index", qos: .utility)
     private var watcher: FolderWatcher?
@@ -30,9 +31,21 @@ final class AppModel {
     private var reloadGeneration = 0
     private var launchError: String?
     private var keepStatus = false
+    private var searchDebounce: DispatchWorkItem?
+    private static let videoTextKey = "Stillroom.recognizeVideoText"
     var selectedAssetID: String?
     private(set) var selectedAssets: [Asset] = []
     var presentedTool: WorkspaceTool?
+    var searchText = ""
+    private(set) var searchPlan = SearchPlan.inactive
+    var hoveredTextHitID: Int64?
+    private(set) var findToken = 0
+    var recognizeVideoText = UserDefaults.standard.bool(forKey: AppModel.videoTextKey) {
+        didSet {
+            UserDefaults.standard.set(recognizeVideoText, forKey: Self.videoTextKey)
+            recognition?.schedule(includeVideoKeyframes: recognizeVideoText)
+        }
+    }
     let convertSession = ConvertSession()
     let pdfSession = PDFSession()
 
@@ -48,7 +61,16 @@ final class AppModel {
     }
 
     var queryToken: String {
-        "\(selectedSourceID ?? "*")|\(selectedKind?.rawValue ?? "*")"
+        "\(selectedSourceID ?? "*")|\(selectedKind?.rawValue ?? "*")|\(searchText)"
+    }
+
+    var isSearching: Bool { searchPlan.isActive }
+
+    var smartSearchReady: Bool {
+        ClipInstall.isComplete(directory: ClipModel.resolve(
+            home: FileManager.default.homeDirectoryForCurrentUser,
+            bundle: .main
+        ))
     }
 
     init() {
@@ -57,11 +79,13 @@ final class AppModel {
             let database = try IndexDatabase(path: IndexLocation.databaseURL(home: home).path)
             self.database = database
             self.indexer = Indexer(database: database, metadataReader: AppleMetadataReader())
+            self.recognition = RecognitionService(database: database, home: home)
             let cache = ThumbnailCache(directory: IndexLocation.thumbnailDirectory(home: home))
             self.thumbnails = ThumbnailService(cache: cache)
         } catch {
             self.database = nil
             self.indexer = nil
+            self.recognition = nil
             self.thumbnails = nil
             self.launchError = error.localizedDescription
             self.status = error.localizedDescription
@@ -77,11 +101,37 @@ final class AppModel {
         } catch {
             status = error.localizedDescription
         }
+        recognition?.onProgress = { [weak self] text in
+            Task { @MainActor in
+                guard let self, !self.isIndexing, !self.keepStatus else { return }
+                self.status = text ?? "Library is up to date"
+            }
+        }
         restartWatcher()
         reload()
         for source in sources where source.enabled {
             scheduleScan(source)
         }
+        recognition?.schedule(includeVideoKeyframes: recognizeVideoText)
+    }
+
+    func find() {
+        findToken += 1
+    }
+
+    func searchChanged() {
+        searchDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                self?.reload()
+            }
+        }
+        searchDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    func textHits(for asset: Asset) -> [TextHit] {
+        (try? database?.textHits(assetID: asset.id)) ?? []
     }
 
     func selectAll() {
@@ -340,6 +390,7 @@ final class AppModel {
         }
         endJob()
         reload()
+        recognition?.schedule(includeVideoKeyframes: recognizeVideoText)
     }
 
     private func beginJob() {
@@ -359,14 +410,32 @@ final class AppModel {
         guard let database else { return }
         reloadGeneration += 1
         let generation = reloadGeneration
+        let plan = SearchPlan.parse(searchText)
+        searchPlan = plan
+        hoveredTextHitID = nil
         let query = makeQuery()
         let enabled = sources.filter(\.enabled).map(\.id)
         let selectedIDs = selectedAssets.map(\.id)
         let focusedID = selectedAssetID
+        let service = recognition
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let assets = (try? database.fetchAssets(matching: query)) ?? []
-            let total = (try? database.countAssets(matching: query)) ?? assets.count
             let counts = (try? database.libraryCounts(enabledSourceIDs: enabled)) ?? .empty
+            let assets: [Asset]
+            let total: Int
+            if plan.isActive {
+                if plan.matchesNothing {
+                    assets = []
+                    total = 0
+                } else {
+                    let vector = service?.queryVector(for: plan.raw)
+                    let ranked = (try? database.searchLibrary(plan: plan, scope: query, queryVector: vector)) ?? []
+                    assets = ranked.map(\.asset)
+                    total = assets.count
+                }
+            } else {
+                assets = (try? database.fetchAssets(matching: query)) ?? []
+                total = (try? database.countAssets(matching: query)) ?? assets.count
+            }
             let refreshed = selectedIDs.compactMap { id in assets.first(where: { $0.id == id }) }
             let focused = refreshed.first { $0.id == focusedID } ?? refreshed.last
             Task { @MainActor in

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var model: AppModel
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -19,6 +20,25 @@ struct RootView: View {
             }
             .background(Palette.canvasColor)
             .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    HStack(spacing: 6) {
+                        TextField("Text, names, places, dates", text: $model.searchText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 240)
+                            .focused($searchFocused)
+                            .help("Find text in pictures, file names, places, and dates")
+                        if !model.searchText.isEmpty {
+                            Button {
+                                model.searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Clear search")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
                         if model.isIndexing {
@@ -63,6 +83,12 @@ struct RootView: View {
             }
         }
         .navigationTitle(model.filterTitle)
+        .onChange(of: model.searchText) { _, _ in
+            model.searchChanged()
+        }
+        .onChange(of: model.findToken) { _, _ in
+            searchFocused = true
+        }
         .sheet(item: $model.presentedTool) { tool in
             switch tool {
             case .convert:

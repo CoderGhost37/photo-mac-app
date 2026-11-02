@@ -18,6 +18,8 @@ public struct Asset: Identifiable, Equatable, Sendable {
     public var duration: TimeInterval?
     public var latitude: Double?
     public var longitude: Double?
+    /// City, region, or country already stored in the file. Nothing is looked up over the network.
+    public var placeName: String?
     public var contentHash: String?
     public var cameraMake: String?
     public var cameraModel: String?
@@ -43,6 +45,7 @@ public struct Asset: Identifiable, Equatable, Sendable {
         duration: TimeInterval?,
         latitude: Double?,
         longitude: Double?,
+        placeName: String? = nil,
         contentHash: String?,
         cameraMake: String? = nil,
         cameraModel: String? = nil,
@@ -67,6 +70,7 @@ public struct Asset: Identifiable, Equatable, Sendable {
         self.duration = duration
         self.latitude = latitude
         self.longitude = longitude
+        self.placeName = placeName
         self.contentHash = contentHash
         self.cameraMake = cameraMake
         self.cameraModel = cameraModel
