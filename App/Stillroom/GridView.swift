@@ -1,7 +1,11 @@
 import AppKit
 import PhotoIndex
-import QuickLook
 import SwiftUI
+#if canImport(QuickLookUI)
+import QuickLookUI
+#else
+import Quartz
+#endif
 
 struct GridView: View {
     var model: AppModel
