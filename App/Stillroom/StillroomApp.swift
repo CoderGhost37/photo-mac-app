@@ -26,6 +26,13 @@ struct StillroomApp: App {
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
             }
+            CommandGroup(after: .sidebar) {
+                Button("Find") {
+                    model.find()
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+                Toggle("Text in Videos", isOn: $model.recognizeVideoText)
+            }
         }
     }
 }

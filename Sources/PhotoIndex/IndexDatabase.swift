@@ -18,7 +18,7 @@ public enum IndexError: Error, Equatable, CustomStringConvertible, LocalizedErro
 }
 
 public final class IndexDatabase: Sendable {
-    private let db: DatabaseQueue
+    let db: DatabaseQueue
 
     public init(path: String) throws {
         if path != ":memory:" {
@@ -37,6 +37,7 @@ public final class IndexDatabase: Sendable {
             self.db = try DatabaseQueue(path: path, configuration: configuration)
         }
         try Self.migrator.migrate(self.db)
+        try backfillSearchKeywords()
     }
 
     public static func inMemory() throws -> IndexDatabase {
@@ -63,6 +64,9 @@ public final class IndexDatabase: Sendable {
 
     public func deleteSource(id: String) throws {
         try db.write { database in
+            let rows = try Row.fetchAll(database, sql: "SELECT id FROM asset WHERE sourceID = ?", arguments: [id])
+            let ids = rows.compactMap { $0["id"] as String? }
+            try deleteSearchRows(database, assetIDs: ids)
             try database.execute(sql: "DELETE FROM source WHERE id = ?", arguments: [id])
         }
     }
@@ -100,7 +104,9 @@ public final class IndexDatabase: Sendable {
         try db.write { database in
             for asset in inserted + updated {
                 try asset.save(database)
+                try upsertKeyword(database, asset: asset)
             }
+            try deleteSearchRows(database, assetIDs: deletedIDs)
             let chunk = 200
             var index = 0
             while index < deletedIDs.count {
@@ -280,6 +286,11 @@ public final class IndexDatabase: Sendable {
                 unique: true
             )
         }
+        migrator.registerMigration("v2-search") { database in
+            for statement in SearchSchema.statements {
+                try database.execute(sql: statement)
+            }
+        }
         return migrator
     }
 }
@@ -343,6 +354,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         duration = row["duration"]
         latitude = row["latitude"]
         longitude = row["longitude"]
+        placeName = row["placeName"]
         contentHash = row["contentHash"]
         cameraMake = row["cameraMake"]
         cameraModel = row["cameraModel"]
@@ -369,6 +381,7 @@ extension Asset: FetchableRecord, PersistableRecord, TableRecord {
         container["duration"] = duration
         container["latitude"] = latitude
         container["longitude"] = longitude
+        container["placeName"] = placeName
         container["contentHash"] = contentHash
         container["cameraMake"] = cameraMake
         container["cameraModel"] = cameraModel

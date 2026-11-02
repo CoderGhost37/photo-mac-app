@@ -5,6 +5,7 @@ import SwiftUI
 struct InspectorView: View {
     var model: AppModel
     @State private var preview: NSImage?
+    @State private var hits: [TextHit] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -21,6 +22,7 @@ struct InspectorView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        phrases
                         facts(asset)
                         actions(asset)
                     }
@@ -42,27 +44,107 @@ struct InspectorView: View {
         .background(Palette.inspectorColor)
         .task(id: model.selectedAsset?.id) {
             preview = nil
-            guard let asset = model.selectedAsset, let thumbnails = model.thumbnails else { return }
+            hits = []
+            model.hoveredTextHitID = nil
+            guard let asset = model.selectedAsset else { return }
+            hits = model.textHits(for: asset)
+            guard let thumbnails = model.thumbnails else { return }
             preview = await thumbnails.image(for: asset, pointSize: 560, scale: 2, quality: .preview)
         }
     }
 
-    private func previewBlock(_ asset: Asset) -> some View {
-        ZStack {
-            Palette.canvasColor
-            if let preview {
-                Image(nsImage: preview)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(12)
-            } else {
-                Image(systemName: Format.mediaSymbol(asset.mediaKind))
-                    .font(.system(size: 36))
-                    .foregroundStyle(.secondary)
+    private var matchedHits: [TextHit] {
+        guard model.isSearching else { return [] }
+        let tokens = model.searchPlan.highlightTokens
+        return hits.filter { TextHighlight.matches(text: $0.text, tokens: tokens) }
+    }
+
+    private var phrases: some View {
+        let matched = matchedHits
+        return Group {
+            if !matched.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Text in this picture")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(matched) { hit in
+                        Text(hit.text)
+                            .font(.callout)
+                            .foregroundStyle(Palette.inkColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                model.hoveredTextHitID == hit.id
+                                    ? Palette.accentColor.opacity(0.18)
+                                    : Color.clear
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .onHover { inside in
+                                if inside {
+                                    model.hoveredTextHitID = hit.id
+                                } else if model.hoveredTextHitID == hit.id {
+                                    model.hoveredTextHitID = nil
+                                }
+                            }
+                    }
+                }
             }
         }
+    }
+
+    private func previewBlock(_ asset: Asset) -> some View {
+        GeometryReader { geo in
+            let imageSize = preview?.size ?? CGSize(width: 1, height: 1)
+            let fitted = AspectFit.rect(
+                containerWidth: geo.size.width,
+                containerHeight: geo.size.height,
+                imageWidth: imageSize.width,
+                imageHeight: imageSize.height
+            )
+            ZStack(alignment: .topLeading) {
+                Palette.canvasColor
+                if let preview, let fitted {
+                    Image(nsImage: preview)
+                        .resizable()
+                        .frame(width: fitted.width, height: fitted.height)
+                        .position(x: fitted.x + fitted.width / 2, y: fitted.y + fitted.height / 2)
+                    boxes(in: fitted)
+                } else {
+                    Image(systemName: Format.mediaSymbol(asset.mediaKind))
+                        .font(.system(size: 36))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .padding(12)
         .frame(height: 220)
         .frame(maxWidth: .infinity)
+        .background(Palette.canvasColor)
+    }
+
+    private func boxes(in fitted: FittedRect) -> some View {
+        let matched = matchedHits
+        return ZStack(alignment: .topLeading) {
+            ForEach(matched) { hit in
+                let box = hit.box.flippedVertically().clamped()
+                let emphasized = model.hoveredTextHitID == hit.id
+                let quiet = model.hoveredTextHitID != nil && !emphasized
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(Palette.accentColor.opacity(quiet ? 0.25 : 1), lineWidth: emphasized ? 2.5 : 1.5)
+                    .background(Palette.accentColor.opacity(emphasized ? 0.28 : (quiet ? 0.04 : 0.14)))
+                    .frame(
+                        width: max(2, box.width * fitted.width),
+                        height: max(2, box.height * fitted.height)
+                    )
+                    .offset(
+                        x: fitted.x + box.x * fitted.width,
+                        y: fitted.y + box.y * fitted.height
+                    )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 
     private func facts(_ asset: Asset) -> some View {
@@ -87,6 +169,9 @@ struct InspectorView: View {
             }
             if let exposure = exposureLine(asset) {
                 fact("Exposure", exposure)
+            }
+            if let placeName = asset.placeName {
+                fact("Place", placeName)
             }
             if let place = Format.coordinate(latitude: asset.latitude, longitude: asset.longitude) {
                 fact("Location", place)

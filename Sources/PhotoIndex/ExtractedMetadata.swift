@@ -6,6 +6,7 @@ public struct ExtractedMetadata: Equatable, Sendable {
     public var createdAt: Date?
     public var latitude: Double?
     public var longitude: Double?
+    public var placeName: String?
     public var duration: TimeInterval?
     public var cameraMake: String?
     public var cameraModel: String?
@@ -21,6 +22,7 @@ public struct ExtractedMetadata: Equatable, Sendable {
         createdAt: Date? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil,
+        placeName: String? = nil,
         duration: TimeInterval? = nil,
         cameraMake: String? = nil,
         cameraModel: String? = nil,
@@ -35,6 +37,7 @@ public struct ExtractedMetadata: Equatable, Sendable {
         self.createdAt = createdAt
         self.latitude = latitude
         self.longitude = longitude
+        self.placeName = placeName
         self.duration = duration
         self.cameraMake = cameraMake
         self.cameraModel = cameraModel
@@ -47,9 +50,9 @@ public struct ExtractedMetadata: Equatable, Sendable {
 
     public var hasValues: Bool {
         pixelWidth != nil || pixelHeight != nil || createdAt != nil || latitude != nil
-            || longitude != nil || duration != nil || cameraMake != nil || cameraModel != nil
-            || lensModel != nil || iso != nil || aperture != nil || shutterSpeed != nil
-            || focalLength != nil
+            || longitude != nil || placeName != nil || duration != nil || cameraMake != nil
+            || cameraModel != nil || lensModel != nil || iso != nil || aperture != nil
+            || shutterSpeed != nil || focalLength != nil
     }
 
     public func fillingGaps(from other: ExtractedMetadata) -> ExtractedMetadata {
@@ -59,6 +62,7 @@ public struct ExtractedMetadata: Equatable, Sendable {
         if copy.createdAt == nil { copy.createdAt = other.createdAt }
         if copy.latitude == nil { copy.latitude = other.latitude }
         if copy.longitude == nil { copy.longitude = other.longitude }
+        if copy.placeName == nil { copy.placeName = other.placeName }
         if copy.duration == nil { copy.duration = other.duration }
         if copy.cameraMake == nil { copy.cameraMake = other.cameraMake }
         if copy.cameraModel == nil { copy.cameraModel = other.cameraModel }

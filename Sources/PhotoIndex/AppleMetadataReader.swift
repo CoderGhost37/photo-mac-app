@@ -65,7 +65,26 @@ enum ImageIOMetadata {
                 meta.longitude = ref?.uppercased() == "W" ? -abs(longitude) : abs(longitude)
             }
         }
+        meta.placeName = placeName(from: properties)
         return meta.hasValues ? meta : nil
+    }
+
+    private static func placeName(from properties: NSDictionary) -> String? {
+        guard let iptc = properties[kCGImagePropertyIPTCDictionary] as? NSDictionary else { return nil }
+        let keys = [
+            kCGImagePropertyIPTCSubLocation,
+            kCGImagePropertyIPTCCity,
+            kCGImagePropertyIPTCProvinceState,
+            kCGImagePropertyIPTCCountryPrimaryLocationName
+        ]
+        var parts: [String] = []
+        for key in keys {
+            guard let value = stringValue(iptc[key]) else { continue }
+            if !parts.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) {
+                parts.append(value)
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 
     private static func exifDate(_ string: String?) -> Date? {
