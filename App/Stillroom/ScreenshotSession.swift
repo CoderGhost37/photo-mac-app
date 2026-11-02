@@ -155,7 +155,7 @@ enum ScreenshotSession {
                 } else {
                     y = toEnd ? 0 : maxOffset
                 }
-                clip.scrollToPoint(NSPoint(x: 0, y: y))
+                clip.scroll(to: NSPoint(x: 0, y: y))
                 scroll.reflectScrolledClipView(clip)
                 let anchorY = toEnd ? document.bounds.maxY - 1 : document.bounds.minY
                 document.scrollToVisible(NSRect(x: 0, y: anchorY, width: 1, height: 1))
