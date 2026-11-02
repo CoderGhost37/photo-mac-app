@@ -119,7 +119,13 @@ enum ScreenshotSession {
         let window = NSApp.windows.first { $0.canBecomeMain } ?? NSApp.windows.first
         guard let window else { return }
         window.appearance = NSAppearance(named: .darkAqua)
-        window.setFrame(NSRect(x: 40, y: 40, width: 1280, height: 820), display: true)
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let width = min(1280, visible.width - 16)
+        let height = min(820, visible.height - 16)
+        window.setFrame(
+            NSRect(x: visible.minX + 8, y: visible.minY + 8, width: width, height: height),
+            display: true
+        )
         window.makeKeyAndOrderFront(nil)
     }
 
@@ -127,23 +133,19 @@ enum ScreenshotSession {
     private static func capture(_ name: String) {
         guard let directory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var best: (image: CGImage, variance: Double)?
-        for _ in 0..<12 {
+        var chosen: CGImage?
+        for _ in 0..<16 {
             prepareWindow()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain })
-                ?? NSApp.windows.first(where: \.isVisible) else { continue }
-            window.displayIfNeeded()
-            for image in shotCandidates(window) where !isPlaceholder(image) {
-                let variance = colorVariance(image)
-                if best == nil || variance > best!.variance {
-                    best = (image, variance)
-                }
-            }
-            if let best, best.variance > 8 { break }
+                ?? NSApp.windows.first(where: \.isVisible),
+                  let image = windowImage(window),
+                  isUsableWindowShot(image) else { continue }
+            chosen = image
+            break
         }
-        guard var image = best?.image else {
-            print("screenshot \(name): no window image")
+        guard var image = chosen else {
+            print("screenshot \(name): no composited window image")
             fflush(stdout)
             return
         }
@@ -153,24 +155,8 @@ enum ScreenshotSession {
         let url = directory.appendingPathComponent("\(name).png")
         guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
         try? data.write(to: url)
-        print("screenshot \(name): \(image.width)x\(image.height) variance \(best?.variance ?? 0)")
+        print("screenshot \(name): \(image.width)x\(image.height)")
         fflush(stdout)
-    }
-
-    @MainActor
-    private static func shotCandidates(_ window: NSWindow) -> [CGImage] {
-        var images: [CGImage] = []
-        if let image = windowImage(window) {
-            images.append(image)
-        }
-        if let view = window.contentView, view.bounds.width > 2, view.bounds.height > 2,
-           let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
-            view.cacheDisplay(in: view.bounds, to: rep)
-            if let image = rep.cgImage {
-                images.append(image)
-            }
-        }
-        return images
     }
 
     private static func windowImage(_ window: NSWindow) -> CGImage? {
@@ -206,34 +192,43 @@ enum ScreenshotSession {
         return yellow(sample(4, 4))
     }
 
-    private static func cropSidebar(_ image: CGImage) -> CGImage? {
-        let cropWidth = max(1, min(image.width, Int(Double(image.width) * 0.24)))
-        return image.cropping(to: CGRect(x: 0, y: 0, width: cropWidth, height: image.height))
+    /// Window-server shots of an uncomposited sidebar come back white, and a missed surface is a rainbow edge.
+    private static func isUsableWindowShot(_ image: CGImage) -> Bool {
+        guard image.width > 400, image.height > 300, !isPlaceholder(image) else { return false }
+        let side = averageColor(image, x: max(24, image.width / 12), y: image.height / 2)
+        if side.0 > 200 && side.1 > 200 && side.2 > 200 { return false }
+        let edge = averageColor(image, x: image.width - 16, y: image.height / 2)
+        let spread = max(edge.0, edge.1, edge.2) - min(edge.0, edge.1, edge.2)
+        if spread > 90 && max(edge.0, edge.1, edge.2) > 120 { return false }
+        return true
     }
 
-    private static func colorVariance(_ image: CGImage) -> Double {
-        guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return 0 }
+    private static func averageColor(_ image: CGImage, x: Int, y: Int) -> (Int, Int, Int) {
+        guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return (0, 0, 0) }
         let length = CFDataGetLength(data)
-        guard length > 64 else { return 0 }
-        let step = max(4, length / 500)
-        var total = 0.0
-        var count = 0.0
-        var index = 0
-        while index < length {
-            total += Double(bytes[index])
-            count += 1
-            index += step
+        let bytesPerRow = max(image.bytesPerRow, 1)
+        let bytesPerPixel = max(image.bitsPerPixel / 8, 1)
+        var total = (0, 0, 0)
+        var count = 0
+        for dy in -8...8 {
+            for dx in -8...8 {
+                let px = min(max(x + dx * 3, 0), image.width - 1)
+                let py = min(max(y + dy * 3, 0), image.height - 1)
+                let index = py * bytesPerRow + px * bytesPerPixel
+                guard index + 2 < length else { continue }
+                total.0 += Int(bytes[index])
+                total.1 += Int(bytes[index + 1])
+                total.2 += Int(bytes[index + 2])
+                count += 1
+            }
         }
-        guard count > 0 else { return 0 }
-        let mean = total / count
-        var sum = 0.0
-        index = 0
-        while index < length {
-            let delta = Double(bytes[index]) - mean
-            sum += delta * delta
-            index += step
-        }
-        return sum / count
+        guard count > 0 else { return (0, 0, 0) }
+        return (total.0 / count, total.1 / count, total.2 / count)
+    }
+
+    private static func cropSidebar(_ image: CGImage) -> CGImage? {
+        let cropWidth = max(1, min(image.width, Int(Double(image.width) * 0.20)))
+        return image.cropping(to: CGRect(x: 0, y: 0, width: cropWidth, height: image.height))
     }
 
     private static func settle(_ seconds: Double) async {
