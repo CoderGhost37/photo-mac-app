@@ -3,33 +3,41 @@ import PhotoIndex
 import SwiftUI
 
 enum Palette {
-    static let sidebar = dynamic(
-        light: NSColor(srgbRed: 0.955, green: 0.941, blue: 0.910, alpha: 1),
-        dark: NSColor(srgbRed: 0.145, green: 0.145, blue: 0.133, alpha: 1)
+    /// Violet accent. Light #6A45F5, dark #7B5CFF. The asset catalog is the SwiftUI accent.
+    static let accent = dynamic(
+        light: NSColor(srgbRed: 106.0 / 255.0, green: 69.0 / 255.0, blue: 245.0 / 255.0, alpha: 1),
+        dark: NSColor(srgbRed: 123.0 / 255.0, green: 92.0 / 255.0, blue: 1, alpha: 1)
     )
-    static let canvas = dynamic(
-        light: NSColor(srgbRed: 0.910, green: 0.894, blue: 0.855, alpha: 1),
-        dark: NSColor(srgbRed: 0.11, green: 0.11, blue: 0.105, alpha: 1)
-    )
-    static let inspector = dynamic(
-        light: NSColor(srgbRed: 0.973, green: 0.965, blue: 0.945, alpha: 1),
-        dark: NSColor(srgbRed: 0.17, green: 0.17, blue: 0.155, alpha: 1)
-    )
-    static let ink = dynamic(
-        light: NSColor(srgbRed: 0.165, green: 0.153, blue: 0.125, alpha: 1),
-        dark: NSColor(srgbRed: 0.93, green: 0.91, blue: 0.86, alpha: 1)
-    )
-    static let accent = NSColor(srgbRed: 0.122, green: 0.420, blue: 0.290, alpha: 1)
-    static let cell = dynamic(
-        light: NSColor(srgbRed: 0.84, green: 0.82, blue: 0.76, alpha: 1),
-        dark: NSColor(srgbRed: 0.22, green: 0.22, blue: 0.20, alpha: 1)
-    )
+    static let secondaryBlue = NSColor(srgbRed: 143.0 / 255.0, green: 179.0 / 255.0, blue: 1, alpha: 1)
+    /// Pink used for favorites and memories. Not for chrome or body text.
+    static let favorite = NSColor(srgbRed: 240.0 / 255.0, green: 111.0 / 255.0, blue: 181.0 / 255.0, alpha: 1)
+    static let navy = NSColor(srgbRed: 10.0 / 255.0, green: 11.0 / 255.0, blue: 36.0 / 255.0, alpha: 1)
+    static let sidebar = NSColor.windowBackgroundColor
+    static let canvas = NSColor.windowBackgroundColor
+    static let inspector = NSColor.controlBackgroundColor
+    static let ink = NSColor.labelColor
+    static let cell = NSColor.quaternaryLabelColor
 
     static var sidebarColor: Color { Color(nsColor: sidebar) }
     static var canvasColor: Color { Color(nsColor: canvas) }
     static var inspectorColor: Color { Color(nsColor: inspector) }
     static var inkColor: Color { Color(nsColor: ink) }
-    static var accentColor: Color { Color(nsColor: accent) }
+    static var accentColor: Color { Color.accentColor }
+    static var favoriteColor: Color { Color(nsColor: favorite) }
+    static var secondaryBlueColor: Color { Color(nsColor: secondaryBlue) }
+    /// At most a 4% navy wash over the system window background.
+    static var navyTint: Color { Color(nsColor: navy).opacity(0.04) }
+    static var brandGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 123.0 / 255.0, green: 92.0 / 255.0, blue: 1),
+                Color(nsColor: secondaryBlue),
+                Color(nsColor: favorite)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
     private static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
         NSColor(name: nil) { appearance in
@@ -105,8 +113,8 @@ enum Format {
     static func mediaSymbol(_ kind: MediaKind) -> String {
         switch kind {
         case .photo: return "photo"
-        case .video: return "film"
-        case .screenshot: return "rectangle.dashed"
+        case .video: return "video"
+        case .screenshot: return "camera.viewfinder"
         case .screenRecording: return "record.circle"
         }
     }

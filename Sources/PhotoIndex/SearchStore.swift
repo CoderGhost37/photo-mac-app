@@ -516,13 +516,7 @@ extension IndexDatabase {
 
     private static func scopeClause(_ query: LibraryQuery) -> (String, StatementArguments)? {
         guard !query.sourceIDs.isEmpty else { return nil }
-        let placeholders = Array(repeating: "?", count: query.sourceIDs.count).joined(separator: ",")
-        let sql = """
-        asset.sourceID IN (\(placeholders)) AND asset.mediaKind = COALESCE(?, asset.mediaKind) AND asset.isHidden = ?
-        """
-        let arguments = StatementArguments(query.sourceIDs)
-            + StatementArguments([query.mediaKind?.rawValue, query.visibility == .hidden ? 1 : 0])
-        return (sql, arguments)
+        return IndexDatabase.assetFilter(query: query, qualify: true)
     }
 
     private static func textHit(_ row: Row) -> TextHit? {

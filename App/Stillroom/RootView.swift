@@ -1,118 +1,70 @@
 import AppKit
+import PhotoIndex
 import SwiftUI
 
 struct RootView: View {
     @Bindable var model: AppModel
-    @FocusState private var searchFocused: Bool
+    @Namespace private var photos
 
     var body: some View {
         NavigationSplitView {
             SidebarView(model: model)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 248, max: 320)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 236, max: 320)
         } detail: {
-            VStack(spacing: 0) {
-                if model.browse == .places, !model.isSearching {
-                    if model.mapPoints.isEmpty {
-                        Text("No geotagged photos yet.")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 180)
-                    } else {
-                        PlacesMapView(points: model.mapPoints) { ids in
-                            model.selectPlaceCluster(ids)
+            GridView(model: model, namespace: photos)
+                .navigationTitle(model.filterTitle)
+                .modifier(LibrarySubtitle(text: model.librarySubtitle))
+                .toolbar { toolbarContent }
+                .searchable(
+                    text: $model.searchText,
+                    tokens: $model.searchTokens,
+                    placement: .toolbar,
+                    prompt: Text("Search")
+                ) { token in
+                    Label(token.value, systemImage: token.symbol)
+                }
+                .searchSuggestions {
+                    ForEach(model.searchSuggestions) { suggestion in
+                        Button {
+                            model.addSearchToken(suggestion)
+                        } label: {
+                            Label(suggestion.suggestionTitle, systemImage: suggestion.symbol)
                         }
-                        .frame(height: 280)
-                    }
-                    Divider()
-                }
-                HStack(spacing: 0) {
-                    GridView(model: model)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if model.inspectorVisible {
-                        Divider()
-                        InspectorView(model: model)
-                            .frame(width: 300)
                     }
                 }
+        }
+        .inspector(isPresented: $model.inspectorVisible) {
+            InspectorView(model: model)
+        }
+        .inspectorColumnWidth(min: 220, ideal: 280, max: 340)
+        .tint(.accentColor)
+        .background {
+            ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                Palette.navyTint
             }
-            .background(Palette.canvasColor)
-            .overlay {
-                if let story = model.playingStory {
-                    HighlightPlayback(model: model, story: story)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    HStack(spacing: 6) {
-                        TextField("Text, names, places, dates", text: $model.searchText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 240)
-                            .focused($searchFocused)
-                            .help("Find text in pictures, file names, places, and dates")
-                        if !model.searchText.isEmpty {
-                            Button {
-                                model.searchText = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .help("Clear search")
-                        }
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
-                        if model.machinePause != nil {
-                            Image(systemName: "pause.circle")
-                                .foregroundStyle(.secondary)
-                        }
-                        if model.isIndexing && model.machinePause == nil {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(model.status)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Slider(value: $model.thumbnailSide, in: 96...240, step: 8)
-                        .frame(width: 120)
-                        .help("Thumbnail size")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        model.openConvert()
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                    .help("Convert selected files, or drop files in the panel")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        model.openPDF()
-                    } label: {
-                        Image(systemName: "doc.richtext")
-                    }
-                    .help("Make a PDF from the selection, or drop files in the panel")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        model.inspectorVisible.toggle()
-                    } label: {
-                        Image(systemName: "sidebar.trailing")
-                    }
-                    .help("Show or hide the inspector")
-                }
+            .ignoresSafeArea()
+        }
+        .overlay {
+            if let story = model.playingStory {
+                HighlightPlayback(model: model, story: story)
+            } else if let id = model.viewerAssetID, let asset = model.asset(id: id) {
+                PhotoViewer(model: model, asset: asset, namespace: photos)
             }
         }
-        .navigationTitle(model.filterTitle)
+        .background {
+            QuickLookHost(bridge: model.quickLook)
+                .frame(width: 0, height: 0)
+        }
+        .preferredColorScheme(ScreenshotSession.isEnabled ? .dark : nil)
         .onChange(of: model.searchText) { _, _ in
             model.searchChanged()
         }
+        .onChange(of: model.searchTokens) { _, _ in
+            model.searchChanged()
+        }
         .onChange(of: model.findToken) { _, _ in
-            searchFocused = true
+            focusSearchField()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             model.noteInactive()
@@ -131,6 +83,119 @@ struct RootView: View {
                 PDFPanel(model: model, session: model.pdfSession)
             case .deviceImport:
                 DeviceImportPanel(model: model, session: model.importSession)
+            }
+        }
+        .task {
+            if !ScreenshotSession.isEnabled {
+                model.start()
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if model.showsTimelinePicker {
+            ToolbarItem(placement: .principal) {
+                Picker("Grouping", selection: $model.timelineScale) {
+                    Text("Years").tag(TimelineScale.years)
+                    Text("Months").tag(TimelineScale.months)
+                    Text("Days").tag(TimelineScale.days)
+                    Text("All Photos").tag(TimelineScale.all)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 420)
+                .help("Group photos by year, month, day, or show all of them")
+            }
+        }
+        if model.browse == .people, model.selectedSubjectID != nil {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    model.selectPeople()
+                } label: {
+                    Label("People & Pets", systemImage: "chevron.backward")
+                }
+                .help("Back to People & Pets")
+            }
+        }
+        if model.browse == .highlights {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.shuffleMemory()
+                } label: {
+                    Label("Shuffle", systemImage: "shuffle")
+                }
+                .help("Shuffle a memory")
+            }
+            if let story = model.shownStory {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        model.play(story)
+                    } label: {
+                        Label("Play", systemImage: "play.fill")
+                    }
+                    .help("Play this memory")
+                }
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 4) {
+                Image(systemName: "photo")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Slider(value: $model.thumbnailSide, in: 80...320)
+                    .frame(width: 90)
+                    .tint(.accentColor)
+                    .help("Thumbnail size")
+                Image(systemName: "photo.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .help("Thumbnail size")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                model.inspectorVisible.toggle()
+            } label: {
+                Label("Inspector", systemImage: "sidebar.trailing")
+            }
+            .help("Show or hide the inspector")
+        }
+    }
+
+    private func focusSearchField() {
+        DispatchQueue.main.async {
+            guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let root = window.contentView else { return }
+            if let field = findSearchField(in: root) {
+                window.makeFirstResponder(field)
+            }
+        }
+    }
+
+    private func findSearchField(in view: NSView) -> NSSearchField? {
+        if let field = view as? NSSearchField { return field }
+        for subview in view.subviews {
+            if let field = findSearchField(in: subview) { return field }
+        }
+        return nil
+    }
+}
+
+private struct LibrarySubtitle: ViewModifier {
+    var text: String
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.navigationSubtitle(text)
+        } else {
+            content.toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Text(text)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
