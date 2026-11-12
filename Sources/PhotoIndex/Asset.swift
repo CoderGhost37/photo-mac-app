@@ -34,6 +34,8 @@ public struct Asset: Identifiable, Equatable, Sendable {
     public var indexedAt: Date?
     /// Index-only. Hiding does not rename, move, or change the file.
     public var isHidden: Bool
+    /// Index-only. Favoriting does not rename, move, or change the file.
+    public var isFavorite: Bool
 
     public init(
         id: String,
@@ -61,7 +63,8 @@ public struct Asset: Identifiable, Equatable, Sendable {
         focalLength: Double? = nil,
         fileMTime: Date? = nil,
         indexedAt: Date? = nil,
-        isHidden: Bool = false
+        isHidden: Bool = false,
+        isFavorite: Bool = false
     ) {
         self.id = id
         self.sourceID = sourceID
@@ -89,6 +92,7 @@ public struct Asset: Identifiable, Equatable, Sendable {
         self.fileMTime = fileMTime
         self.indexedAt = indexedAt
         self.isHidden = isHidden
+        self.isFavorite = isFavorite
     }
 }
 

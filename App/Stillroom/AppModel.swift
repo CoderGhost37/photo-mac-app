@@ -27,8 +27,32 @@ final class AppModel {
     var playingIndex = 0
     var playingStarted = Date()
     private(set) var shownStory: HighlightStory?
-    var thumbnailSide: Double = 144
-    var inspectorVisible = true
+    var thumbnailSide: Double = StillroomPreferences.thumbnailSide {
+        didSet {
+            let clamped = min(320, max(80, thumbnailSide))
+            if clamped != thumbnailSide {
+                thumbnailSide = clamped
+                return
+            }
+            StillroomPreferences.storeThumbnail(clamped)
+        }
+    }
+    var timelineScale: TimelineScale = StillroomPreferences.timelineScale {
+        didSet { StillroomPreferences.storeTimeline(timelineScale) }
+    }
+    var sort: LibrarySort = .newest
+    var inspectorVisible = false
+    private(set) var recentCount = 0
+    private(set) var knownPlaces: [String] = []
+    private(set) var scanProgress: ScanProgress?
+    var searchTokens: [LibrarySearchToken] = []
+    var viewerAssetID: String?
+    var highlightedSubjectID: String?
+    var selectionAnchorID: String?
+    var columnEstimate = 4
+    var keyboardMoveToken = 0
+    let quickLook = QuickLookBridge()
+    private var magnifyBaseline: Double?
     var status = "Opening library…"
     var isIndexing = false
     private(set) var machinePause: BackgroundPauseReason?
@@ -82,16 +106,23 @@ final class AppModel {
             return "People & Pets"
         case .highlights:
             if let playingStory, playingStory.id == selectedStoryID {
-                return playingStory.title
+                return playingStory.kind == .forYou ? "For You" : playingStory.title
+            }
+            if let shownStory, shownStory.id == selectedStoryID {
+                return shownStory.kind == .forYou ? "For You" : shownStory.title
             }
             if let selectedStoryID, let story = stories.first(where: { $0.id == selectedStoryID }) {
-                return story.title
+                return story.kind == .forYou ? "For You" : story.title
             }
-            return "Highlights"
+            return "Memories"
         case .duplicates:
             return "Duplicates"
         case .hidden:
             return "Hidden"
+        case .favorites:
+            return "Favorites"
+        case .recents:
+            return "Recents"
         case .library:
             var parts: [String] = []
             if let selectedSourceID, let source = sources.first(where: { $0.id == selectedSourceID }) {
@@ -100,13 +131,116 @@ final class AppModel {
             if let selectedKind {
                 parts.append(Format.mediaTitle(selectedKind))
             }
-            return parts.isEmpty ? "All Items" : parts.joined(separator: " · ")
+            return parts.isEmpty ? "All Photos" : parts.joined(separator: " · ")
         }
+    }
+
+    var librarySubtitle: String {
+        if isSearching {
+            return "\(Format.count(matchedCount)) results"
+        }
+        if browse == .people, selectedSubjectID == nil {
+            let noun = subjectClusters.count == 1 ? "person or pet" : "people & pets"
+            return "\(Format.count(subjectClusters.count)) \(noun)"
+        }
+        let noun = matchedCount == 1 ? "item" : "items"
+        return "\(Format.count(matchedCount)) \(noun)"
+    }
+
+    var showsTimelinePicker: Bool {
+        if isSearching { return false }
+        switch browse {
+        case .library, .favorites, .recents, .places, .hidden:
+            return true
+        case .people:
+            return selectedSubjectID != nil
+        case .highlights, .duplicates:
+            return false
+        }
+    }
+
+    var sidebarStories: [HighlightStory] {
+        stories.filter { story in
+            switch story.kind {
+            case .onThisDay, .yearsAgo, .recentDay:
+                return false
+            default:
+                return true
+            }
+        }
+    }
+
+    var sidebarSelection: SidebarSelection {
+        switch browse {
+        case .favorites: return .favorites
+        case .recents: return .recents
+        case .places: return .map
+        case .people: return .people
+        case .highlights:
+            if let selectedStoryID { return .story(selectedStoryID) }
+            return .story(sidebarStories.first?.id ?? "")
+        case .duplicates: return .duplicates
+        case .hidden: return .hidden
+        case .library:
+            if let selectedKind { return .kind(selectedKind) }
+            if let selectedSourceID { return .source(selectedSourceID) }
+            return .all
+        }
+    }
+
+    var footer: LibraryFooter {
+        if keepStatus || machinePause != nil {
+            return .message(status)
+        }
+        if isIndexing {
+            return .indexing(scanProgress)
+        }
+        return .current
+    }
+
+    var combinedSearchText: String {
+        (searchTokens.map(\.value) + [searchText])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    var searchSuggestions: [LibrarySearchToken] {
+        let typed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return [] }
+        let needle = typed.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        let existing = Set(searchTokens.map(\.id))
+        var items: [LibrarySearchToken] = []
+        func add(_ token: LibrarySearchToken) {
+            guard !existing.contains(token.id), !items.contains(token) else { return }
+            items.append(token)
+        }
+        for cluster in subjectClusters {
+            let name = cluster.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            let folded = name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            guard folded.contains(needle) else { continue }
+            add(LibrarySearchToken(kind: .person, value: name))
+            if items.count >= 4 { break }
+        }
+        for place in knownPlaces {
+            let folded = place.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            guard folded.contains(needle) else { continue }
+            add(LibrarySearchToken(kind: .place, value: place))
+            if items.count >= 6 { break }
+        }
+        let plan = SearchPlan.parse(typed)
+        if plan.dateRange != nil || !plan.dateTokens.isEmpty {
+            add(LibrarySearchToken(kind: .date, value: typed))
+        }
+        add(LibrarySearchToken(kind: .text, value: typed))
+        return Array(items.prefix(8))
     }
 
     var queryToken: String {
         let blocks = gridBlocks?.map(\.id).joined(separator: ",") ?? ""
-        return "\(browse.rawValue)|\(selectedSourceID ?? "*")|\(selectedKind?.rawValue ?? "*")|\(searchText)|\(selectedSubjectID ?? "")|\(selectedStoryID ?? "")|\(selectedDuplicateID ?? "")|\(placeMemberIDs?.count ?? -1)|\(blocks)"
+        let tokens = searchTokens.map(\.id).joined(separator: ",")
+        return "\(browse.rawValue)|\(selectedSourceID ?? "*")|\(selectedKind?.rawValue ?? "*")|\(combinedSearchText)|\(tokens)|\(selectedSubjectID ?? "")|\(selectedStoryID ?? "")|\(selectedDuplicateID ?? "")|\(placeMemberIDs?.count ?? -1)|\(blocks)"
     }
 
     var isSearching: Bool { searchPlan.isActive }
@@ -121,7 +255,7 @@ final class AppModel {
     init() {
         let limits = MachineLimits()
         self.limits = limits
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = StillroomPreferences.home
         do {
             let database = try IndexDatabase(path: IndexLocation.databaseURL(home: home).path)
             self.database = database
@@ -151,6 +285,17 @@ final class AppModel {
             try prepareSources()
         } catch {
             status = error.localizedDescription
+        }
+        if ScreenshotSession.isEnabled {
+            guard let database else { return }
+            for index in sources.indices where sources[index].enabled {
+                sources[index].enabled = false
+                try? database.save(source: sources[index])
+            }
+            status = "Library is up to date"
+            isIndexing = false
+            reload()
+            return
         }
         let progress: @Sendable (String?) -> Void = { [weak self] text in
             Task { @MainActor in
@@ -674,7 +819,7 @@ final class AppModel {
 
     private func prepareSources() throws {
         guard let database else { return }
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = StillroomPreferences.home
         let capture = ScreenshotLocation.current(home: home)
         _ = try database.synchronizeBuiltinSources(homeDirectory: home, captureDirectory: capture)
         let discovered = CaptureToolLocator.discover(home: home)
@@ -728,11 +873,18 @@ final class AppModel {
         beginJob()
         status = "Indexing \(source.displayName)…"
         let name = source.displayName
-        let relay = StatusRelay { [weak self] text in
-            Task { @MainActor in
-                self?.status = text
+        let relay = StatusRelay(
+            { [weak self] text in
+                Task { @MainActor in
+                    self?.status = text
+                }
+            },
+            progress: { [weak self] completed, total in
+                Task { @MainActor in
+                    self?.scanProgress = ScanProgress(completed: completed, total: total)
+                }
             }
-        }
+        )
         let limits = self.limits
         scanQueue.async { [weak self] in
             while let reason = limits.current() {
@@ -751,6 +903,7 @@ final class AppModel {
                             source,
                             onProgress: { examined, total in
                                 relay.send("Indexing \(name) · \(examined) of \(total)")
+                                relay.sendProgress(completed: examined, total: total)
                             },
                             onPause: { reason in
                                 relay.send(BackgroundPause.message(reason))
@@ -804,6 +957,9 @@ final class AppModel {
     private func endJob() {
         jobs = max(0, jobs - 1)
         isIndexing = jobs > 0
+        if !isIndexing {
+            scanProgress = nil
+        }
         if !isIndexing, launchError == nil, !keepStatus {
             status = "Library is up to date"
         }
@@ -848,12 +1004,17 @@ final class AppModel {
                 names[cluster.id] = cluster.name
             }
             let stories = HighlightRules.stories(assets: memories, names: names, now: Date(), calendar: .current)
+            let placeNames = Array(Set(memories.compactMap { asset -> String? in
+                let trimmed = asset.placeName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return trimmed.isEmpty ? nil : trimmed
+            })).sorted()
             Task { @MainActor in
                 guard let self, generation == self.memoryGeneration else { return }
                 self.subjectClusters = clusters
                 self.mapPoints = points
                 self.duplicateGroups = groups
                 self.stories = stories
+                self.knownPlaces = placeNames
                 if let selectedSubjectID = self.selectedSubjectID, !clusters.contains(where: { $0.id == selectedSubjectID }) {
                     self.selectedSubjectID = nil
                 }
@@ -866,7 +1027,7 @@ final class AppModel {
         guard let database else { return }
         reloadGeneration += 1
         let generation = reloadGeneration
-        let plan = SearchPlan.parse(searchText)
+        let plan = SearchPlan.parse(combinedSearchText)
         searchPlan = plan
         hoveredTextHitID = nil
         let query = makeQuery()
@@ -880,8 +1041,12 @@ final class AppModel {
         let story = currentStory()
         let groups = duplicateGroups
         let duplicateID = selectedDuplicateID
+        let recentSince = RecentsWindow.start(now: Date(), calendar: .current)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let counts = (try? database.libraryCounts(enabledSourceIDs: enabled)) ?? .empty
+            let recentCount = enabled.isEmpty
+                ? 0
+                : ((try? database.countAssets(matching: LibraryQuery(sourceIDs: enabled, createdAfter: recentSince))) ?? 0)
             var assets: [Asset]
             var blocks: [GridBlock]?
             if plan.isActive {
@@ -895,7 +1060,7 @@ final class AppModel {
                 blocks = nil
             } else {
                 switch browse {
-                case .library:
+                case .library, .favorites, .recents:
                     assets = (try? database.fetchAssets(matching: query)) ?? []
                     blocks = nil
                 case .places:
@@ -953,6 +1118,7 @@ final class AppModel {
                 self.gridBlocks = blocks
                 self.matchedCount = blocks?.reduce(0) { $0 + $1.assets.count } ?? assets.count
                 self.counts = counts
+                self.recentCount = recentCount
                 self.selectedAssets = refreshed
                 self.selectedAsset = focused
                 self.selectedAssetID = focused?.id
@@ -990,26 +1156,546 @@ final class AppModel {
             return LibraryQuery(sourceIDs: sources.map(\.id), mediaKind: nil, visibility: .hidden)
         }
         let enabled = sources.filter(\.enabled).map(\.id)
-        if browse != .library {
+        switch browse {
+        case .favorites:
+            return LibraryQuery(sourceIDs: enabled, favoritesOnly: true)
+        case .recents:
+            return LibraryQuery(sourceIDs: enabled, createdAfter: RecentsWindow.start(now: Date(), calendar: .current))
+        case .library:
+            let sourceIDs = selectedSourceID.map { [$0] } ?? enabled
+            return LibraryQuery(sourceIDs: sourceIDs, mediaKind: selectedKind)
+        case .places, .people, .highlights, .duplicates, .hidden:
             return LibraryQuery(sourceIDs: enabled, mediaKind: nil)
         }
-        let sourceIDs: [String]
-        if let selectedSourceID {
-            sourceIDs = [selectedSourceID]
-        } else {
-            sourceIDs = enabled
+    }
+
+    func selectFavorites() {
+        browse = .favorites
+        selectedSourceID = nil
+        selectedKind = nil
+        clearPins()
+        reload()
+    }
+
+    func selectRecents() {
+        browse = .recents
+        selectedSourceID = nil
+        selectedKind = nil
+        clearPins()
+        reload()
+    }
+
+    func selectPeople() {
+        browse = .people
+        selectedKind = nil
+        selectedDuplicateID = nil
+        selectedStoryID = nil
+        placeMemberIDs = nil
+        shownStory = nil
+        stopStory()
+        selectedSubjectID = nil
+        reload()
+    }
+
+    func openSubject(_ id: String) {
+        browse = .people
+        selectedKind = nil
+        selectedDuplicateID = nil
+        selectedStoryID = nil
+        placeMemberIDs = nil
+        shownStory = nil
+        stopStory()
+        selectedSubjectID = id
+        reload()
+    }
+
+    func showStory(_ story: HighlightStory) {
+        guard !story.assetIDs.isEmpty else { return }
+        browse = .highlights
+        selectedKind = nil
+        selectedSubjectID = nil
+        selectedDuplicateID = nil
+        placeMemberIDs = nil
+        selectedStoryID = story.id
+        shownStory = story
+        stopStory()
+        reload()
+    }
+
+    func applySidebar(_ selection: SidebarSelection) {
+        switch selection {
+        case .all:
+            selectAll()
+        case .favorites:
+            selectFavorites()
+        case .recents:
+            selectRecents()
+        case .kind(let kind):
+            browse = .library
+            clearPins()
+            selectedSourceID = nil
+            selectedKind = kind
+            reload()
+        case .map:
+            selectPlaces()
+        case .people:
+            selectPeople()
+        case .story(let id):
+            if let story = stories.first(where: { $0.id == id }) ?? sidebarStories.first(where: { $0.id == id }) {
+                showStory(story)
+            }
+        case .duplicates:
+            selectDuplicates()
+        case .hidden:
+            selectHidden()
+        case .source(let id):
+            browse = .library
+            clearPins()
+            selectedKind = nil
+            selectedSourceID = id
+            reload()
         }
-        return LibraryQuery(sourceIDs: sourceIDs, mediaKind: selectedKind)
+    }
+
+    func addSearchToken(_ token: LibrarySearchToken) {
+        if !searchTokens.contains(token) {
+            searchTokens.append(token)
+        }
+        searchText = ""
+    }
+
+    func rescan() {
+        let enabled = sources.filter(\.enabled)
+        guard !enabled.isEmpty else {
+            status = "Turn on a source to rescan."
+            keepStatus = true
+            return
+        }
+        keepStatus = false
+        for source in enabled {
+            scheduleScan(source)
+        }
+    }
+
+    func adjustZoom(by delta: Double) {
+        thumbnailSide = min(320, max(80, thumbnailSide + delta))
+    }
+
+    func applyMagnification(_ magnification: CGFloat) {
+        if magnifyBaseline == nil {
+            magnifyBaseline = thumbnailSide
+        }
+        let next = (magnifyBaseline ?? thumbnailSide) * Double(magnification)
+        thumbnailSide = min(320, max(80, next))
+    }
+
+    func endMagnification() {
+        magnifyBaseline = nil
+    }
+
+    func updateColumnEstimate(width: CGFloat) {
+        let side = CGFloat(thumbnailSide)
+        guard side > 0, width > 0 else { return }
+        columnEstimate = max(1, Int((width + 2) / (side + 2)))
+    }
+
+    func visibleSections() -> [TimelineSection] {
+        if isSearching {
+            return assets.isEmpty ? [] : [TimelineSection(id: "results", title: "", place: nil, assets: assets)]
+        }
+        if browse == .duplicates, let gridBlocks {
+            return gridBlocks.map { TimelineSection(id: $0.id, title: $0.title, place: nil, assets: $0.assets) }
+        }
+        if browse == .highlights, let gridBlocks {
+            return gridBlocks.map { TimelineSection(id: $0.id, title: "", place: nil, assets: $0.assets) }
+        }
+        if browse == .people, selectedSubjectID == nil {
+            return []
+        }
+        return TimelineGrouping.sections(assets: assets, scale: timelineScale, sort: sort)
+    }
+
+    func flatAssets() -> [Asset] {
+        visibleSections().flatMap(\.assets)
+    }
+
+    func click(_ asset: Asset) {
+        let flags = NSApp.currentEvent?.modifierFlags ?? []
+        if flags.contains(.command) {
+            toggleSelection(asset)
+        } else if flags.contains(.shift) {
+            extendSelection(to: asset)
+        } else {
+            replaceSelection([asset], focused: asset)
+            selectionAnchorID = asset.id
+        }
+    }
+
+    func toggleSelection(_ asset: Asset) {
+        if selectedAssets.contains(where: { $0.id == asset.id }) {
+            let remaining = selectedAssets.filter { $0.id != asset.id }
+            replaceSelection(remaining, focused: remaining.last)
+        } else {
+            replaceSelection(selectedAssets + [asset], focused: asset)
+            if selectionAnchorID == nil { selectionAnchorID = asset.id }
+        }
+    }
+
+    func extendSelection(to asset: Asset) {
+        let flat = flatAssets()
+        guard let end = flat.firstIndex(where: { $0.id == asset.id }) else {
+            replaceSelection([asset], focused: asset)
+            return
+        }
+        let startID = selectionAnchorID ?? selectedAssetID
+        let start = startID.flatMap { id in flat.firstIndex(where: { $0.id == id }) } ?? end
+        let lower = min(start, end)
+        let upper = max(start, end)
+        replaceSelection(Array(flat[lower...upper]), focused: asset)
+    }
+
+    func moveSelection(delta: Int) {
+        let flat = flatAssets()
+        guard !flat.isEmpty else { return }
+        let current = selectedAssetID.flatMap { id in flat.firstIndex(where: { $0.id == id }) } ?? 0
+        let nextIndex = min(max(0, current + delta), flat.count - 1)
+        let asset = flat[nextIndex]
+        replaceSelection([asset], focused: asset)
+        selectionAnchorID = asset.id
+        keyboardMoveToken += 1
+        if viewerAssetID != nil {
+            viewerAssetID = asset.id
+        }
+    }
+
+    func openViewer(_ asset: Asset) {
+        if !selectedAssets.contains(where: { $0.id == asset.id }) {
+            replaceSelection([asset], focused: asset)
+        }
+        viewerAssetID = asset.id
+    }
+
+    func closeViewer() {
+        viewerAssetID = nil
+    }
+
+    func showInfo(_ asset: Asset) {
+        if !selectedAssets.contains(where: { $0.id == asset.id }) {
+            replaceSelection([asset], focused: asset)
+        } else {
+            selectedAsset = asset
+            selectedAssetID = asset.id
+        }
+        inspectorVisible = true
+    }
+
+    func share(_ asset: Asset) {
+        guard let path = asset.filePath else { return }
+        let url = URL(fileURLWithPath: path)
+        let picker = NSSharingServicePicker(items: [url])
+        guard let view = NSApp.keyWindow?.contentView else { return }
+        let rect = NSRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        picker.show(relativeTo: rect, of: view, preferredEdge: .minY)
+    }
+
+    func quickLookSelection() {
+        let targets = selectedAssets.isEmpty ? (selectedAsset.map { [$0] } ?? []) : selectedAssets
+        let urls = targets.compactMap(\.filePath).map { URL(fileURLWithPath: $0) }
+        guard !urls.isEmpty else { return }
+        quickLook.present(urls)
+    }
+
+    func setFavorite(_ favorite: Bool, assets: [Asset]) {
+        let targets = assets.isEmpty ? selectedAssets : assets
+        guard let database, !targets.isEmpty else { return }
+        do {
+            try database.setFavorite(favorite, assetIDs: targets.map(\.id))
+        } catch {
+            status = error.localizedDescription
+            return
+        }
+        let ids = Set(targets.map(\.id))
+        var delta = 0
+        for index in self.assets.indices where ids.contains(self.assets[index].id) {
+            if self.assets[index].isFavorite != favorite {
+                delta += favorite ? 1 : -1
+            }
+            self.assets[index].isFavorite = favorite
+        }
+        for asset in targets where !self.assets.contains(where: { $0.id == asset.id }) && asset.isFavorite != favorite {
+            delta += favorite ? 1 : -1
+        }
+        var nextCounts = counts
+        nextCounts.favoriteCount = max(0, counts.favoriteCount + delta)
+        counts = nextCounts
+        gridBlocks = gridBlocks?.map { block in
+            var copy = block
+            copy.assets = block.assets.map { asset in
+                guard ids.contains(asset.id) else { return asset }
+                var next = asset
+                next.isFavorite = favorite
+                return next
+            }
+            return copy
+        }
+        if var selected = selectedAsset, ids.contains(selected.id) {
+            selected.isFavorite = favorite
+            selectedAsset = selected
+        }
+        selectedAssets = selectedAssets.map { asset in
+            guard ids.contains(asset.id) else { return asset }
+            var copy = asset
+            copy.isFavorite = favorite
+            return copy
+        }
+        if browse == .favorites, !favorite {
+            self.assets.removeAll { ids.contains($0.id) }
+            matchedCount = gridBlocks?.reduce(0) { $0 + $1.assets.count } ?? self.assets.count
+            selectedAssets.removeAll { ids.contains($0.id) }
+            if let current = selectedAsset, ids.contains(current.id) {
+                selectedAsset = selectedAssets.last
+                selectedAssetID = selectedAsset?.id
+            }
+        }
+    }
+
+    func sceneLabels(for asset: Asset) -> [String] {
+        (try? database?.sceneLabels(assetID: asset.id)) ?? []
+    }
+
+    func people(in asset: Asset) -> [SubjectClusterRecord] {
+        subjectClusters.filter { $0.assetIDs.contains(asset.id) }
+    }
+
+    func installScreenshotLibrary() async {
+        guard let database else { return }
+        let folder = StillroomPreferences.home.appendingPathComponent("Pictures/Fixture", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let specs: [(String, NSColor, NSSize, Date, String?)] = ScreenshotSession.fixtures(now: Date())
+            for spec in specs {
+                let url = folder.appendingPathComponent(spec.0)
+                if let data = ScreenshotSession.jpeg(color: spec.1, size: spec.2) {
+                    try data.write(to: url)
+                    try FileManager.default.setAttributes(
+                        [.creationDate: spec.3, .modificationDate: spec.3],
+                        ofItemAtPath: url.path
+                    )
+                }
+            }
+        } catch {
+            status = error.localizedDescription
+            return
+        }
+        adoptImportFolder(folder)
+        for _ in 0..<80 {
+            if assets.count >= 8 { break }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        let indexed = assets
+        guard !indexed.isEmpty else { return }
+        var updates: [Asset] = []
+        for (offset, asset) in indexed.enumerated() {
+            var copy = asset
+            if offset < 6 {
+                copy.placeName = "Kushavati, Goa"
+                copy.latitude = 15.49
+                copy.longitude = 73.76
+            } else if offset < 9 {
+                copy.placeName = "Panaji"
+                copy.latitude = 15.49
+                copy.longitude = 73.83
+            }
+            if offset == 0 {
+                copy.cameraMake = "Canon"
+                copy.cameraModel = "EOS R5"
+                copy.lensModel = "RF 24-70mm F2.8"
+                copy.iso = 200
+                copy.aperture = 2.8
+                copy.focalLength = 35
+            }
+            updates.append(copy)
+        }
+        try? database.applyChanges(inserted: [], updated: updates, deletedIDs: [])
+        let favoriteIDs = updates.prefix(3).map(\.id)
+        try? database.setFavorite(true, assetIDs: Array(favoriteIDs))
+        if let hero = updates.first {
+            let box = NormalizedBox(x: 0.25, y: 0.2, width: 0.4, height: 0.45)
+            try? database.replaceSubjects(
+                assetID: hero.id,
+                contentToken: "screenshot",
+                subjects: [
+                    StoredSubject(id: "shot-person", assetID: hero.id, kind: .person, box: box, confidence: 0.9, vector: [1, 0, 0, 0])
+                ],
+                labels: [SceneLabel(label: "landscape", confidence: 0.8), SceneLabel(label: "coast", confidence: 0.6)],
+                imageVector: [1, 0, 0, 0]
+            )
+            try? database.replaceTextHits(
+                assetID: hero.id,
+                contentToken: "screenshot-text",
+                observations: [TextObservation(text: "Kushavati", box: NormalizedBox(x: 0.1, y: 0.7, width: 0.4, height: 0.1), confidence: 0.9)]
+            )
+        }
+        if updates.count > 1 {
+            let second = updates[1]
+            try? database.replaceSubjects(
+                assetID: second.id,
+                contentToken: "screenshot-2",
+                subjects: [
+                    StoredSubject(
+                        id: "shot-person-2",
+                        assetID: second.id,
+                        kind: .person,
+                        box: NormalizedBox(x: 0.3, y: 0.25, width: 0.35, height: 0.4),
+                        confidence: 0.8,
+                        vector: [0, 1, 0, 0]
+                    )
+                ],
+                labels: [],
+                imageVector: [0, 1, 0, 0]
+            )
+        }
+        if updates.count > 2 {
+            let third = updates[2]
+            try? database.replaceSubjects(
+                assetID: third.id,
+                contentToken: "screenshot-3",
+                subjects: [
+                    StoredSubject(
+                        id: "shot-dog",
+                        assetID: third.id,
+                        kind: .dog,
+                        box: NormalizedBox(x: 0.2, y: 0.2, width: 0.5, height: 0.5),
+                        confidence: 0.85,
+                        vector: [0, 0, 1, 0]
+                    )
+                ],
+                labels: [SceneLabel(label: "dog", confidence: 0.9)],
+                imageVector: [0, 0, 1, 0]
+            )
+        }
+        try? database.assignNewSubjects(makeID: { UUID().uuidString })
+        if let clusters = try? database.subjectClusters(),
+           let named = clusters.first(where: { $0.assetIDs.contains(updates[0].id) && $0.kind == .person }) {
+            try? database.renameSubject(clusterID: named.id, name: "Asha")
+        }
+        refreshMemories()
+        reload()
+        for _ in 0..<40 {
+            if subjectClusters.count >= 2, assets.contains(where: { $0.placeName != nil }) { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        await waitUntilSettled()
+    }
+
+    func waitUntilSettled() async {
+        var last = reloadGeneration
+        for _ in 0..<25 {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if reloadGeneration == last, !isIndexing {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if reloadGeneration == last { return }
+            }
+            last = reloadGeneration
+        }
     }
 }
 
 enum LibraryBrowse: String, Equatable {
     case library
+    case favorites
+    case recents
     case places
     case people
     case highlights
     case duplicates
     case hidden
+}
+
+enum SidebarSelection: Hashable {
+    case all
+    case favorites
+    case recents
+    case kind(MediaKind)
+    case map
+    case people
+    case story(String)
+    case duplicates
+    case hidden
+    case source(String)
+}
+
+struct LibrarySearchToken: Identifiable, Hashable {
+    enum Kind: String, Hashable {
+        case person
+        case place
+        case date
+        case text
+    }
+
+    var kind: Kind
+    var value: String
+    var id: String { "\(kind.rawValue)|\(value)" }
+
+    var symbol: String {
+        switch kind {
+        case .person: return "person"
+        case .place: return "mappin.and.ellipse"
+        case .date: return "calendar"
+        case .text: return "text.quote"
+        }
+    }
+
+    var suggestionTitle: String {
+        switch kind {
+        case .person: return "Person · \(value)"
+        case .place: return "Place · \(value)"
+        case .date: return "Date · \(value)"
+        case .text: return "Text · \(value)"
+        }
+    }
+}
+
+struct ScanProgress: Equatable {
+    var completed: Int
+    var total: Int
+}
+
+enum LibraryFooter: Equatable {
+    case current
+    case indexing(ScanProgress?)
+    case message(String)
+}
+
+enum StillroomPreferences {
+    static var home: URL {
+        if let raw = ProcessInfo.processInfo.environment["STILLROOM_HOME"], !raw.isEmpty {
+            return URL(fileURLWithPath: raw, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    static let thumbnailKey = "Stillroom.thumbnailSide"
+    static let timelineKey = "Stillroom.timelineScale"
+
+    static var thumbnailSide: Double {
+        let stored = UserDefaults.standard.double(forKey: thumbnailKey)
+        if stored < 80 { return 140 }
+        return min(320, max(80, stored))
+    }
+
+    static func storeThumbnail(_ value: Double) {
+        UserDefaults.standard.set(min(320, max(80, value)), forKey: thumbnailKey)
+    }
+
+    static var timelineScale: TimelineScale {
+        let raw = UserDefaults.standard.string(forKey: timelineKey) ?? ""
+        return TimelineScale(rawValue: raw) ?? .days
+    }
+
+    static func storeTimeline(_ scale: TimelineScale) {
+        UserDefaults.standard.set(scale.rawValue, forKey: timelineKey)
+    }
 }
 
 struct GridBlock: Equatable, Identifiable {
@@ -1028,12 +1714,21 @@ enum WorkspaceTool: String, Identifiable {
 
 private final class StatusRelay: @unchecked Sendable {
     private let handler: (String) -> Void
+    private let progress: (Int, Int) -> Void
 
-    init(_ handler: @escaping (String) -> Void) {
+    init(
+        _ handler: @escaping (String) -> Void,
+        progress: @escaping (Int, Int) -> Void = { _, _ in }
+    ) {
         self.handler = handler
+        self.progress = progress
     }
 
     func send(_ text: String) {
         handler(text)
+    }
+
+    func sendProgress(completed: Int, total: Int) {
+        progress(completed, total)
     }
 }
