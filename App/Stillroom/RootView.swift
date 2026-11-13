@@ -120,19 +120,15 @@ struct RootView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        navigationTools
+        principalTools
+        actionTools
+    }
+
+    @ToolbarContentBuilder
+    private var navigationTools: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             titleStack
-        }
-        if let asset = viewedAsset {
-            ToolbarItem(placement: .principal) {
-                Text(Format.viewerStamp(asset.createdAt))
-                    .font(StillroomFont.control)
-                    .foregroundStyle(Palette.secondaryColor)
-            }
-        } else if model.showsTimelinePicker {
-            ToolbarItem(placement: .principal) {
-                TimelinePicker(scale: $model.timelineScale)
-            }
         }
         if model.browse == .people, model.selectedSubjectID != nil, model.viewerAssetID == nil {
             ToolbarItem(placement: .navigation) {
@@ -144,6 +140,25 @@ struct RootView: View {
                 backButton("Memories") { model.selectMemories() }
             }
         }
+    }
+
+    @ToolbarContentBuilder
+    private var principalTools: some ToolbarContent {
+        if let asset = viewedAsset {
+            ToolbarItem(placement: .principal) {
+                Text(Format.viewerStamp(asset.createdAt))
+                    .font(StillroomFont.control)
+                    .foregroundStyle(Palette.secondaryColor)
+            }
+        } else if model.showsTimelinePicker {
+            ToolbarItem(placement: .principal) {
+                TimelinePicker(scale: $model.timelineScale)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var actionTools: some ToolbarContent {
         if model.browse == .highlights, let story = model.shownStory, model.viewerAssetID == nil, !model.isSearching {
             ToolbarItem(placement: .primaryAction) {
                 Button {
