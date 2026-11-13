@@ -47,8 +47,12 @@ struct SidebarView: View {
 
                 Section("Sources") {
                     ForEach(model.sources) { source in
-                        row(source.displayName, systemImage: Format.sourceSymbol(source.kind), tag: .source(source.id))
-                            .foregroundStyle(source.enabled ? Palette.inkColor : Palette.secondaryColor)
+                        row(
+                            source.displayName,
+                            systemImage: Format.sourceSymbol(source.kind),
+                            tag: .source(source.id),
+                            tint: source.enabled ? Palette.inkColor : Palette.secondaryColor
+                        )
                             .contextMenu {
                                 Button(source.enabled ? "Turn Off" : "Turn On") {
                                     model.setEnabled(!source.enabled, sourceID: source.id)
@@ -79,6 +83,7 @@ struct SidebarView: View {
             .font(StillroomFont.control)
             .scrollContentBackground(.hidden)
             .tint(Palette.accentColor)
+            .background(SidebarSelectionStyle())
 
             footer
                 .padding(.horizontal, 14)
@@ -94,13 +99,27 @@ struct SidebarView: View {
                         .font(StillroomFont.controlMedium)
                         .foregroundStyle(Palette.inkColor)
                 }
+                .padding(.trailing, 18)
             }
         }
     }
 
-    private func row(_ title: String, systemImage: String, tag: SidebarSelection) -> some View {
-        Label(title, systemImage: systemImage)
+    private func row(
+        _ title: String,
+        systemImage: String,
+        tag: SidebarSelection,
+        tint: Color = Palette.inkColor
+    ) -> some View {
+        let selected = model.sidebarSelection == tag
+        return Label(title, systemImage: systemImage)
+            .foregroundStyle(selected ? Color.white : tint)
             .tag(tag)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Palette.accentColor : Color.clear)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1)
+            )
     }
 
     private var selection: Binding<SidebarSelection?> {
@@ -152,6 +171,30 @@ struct SidebarView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Sidebar selection is gray once the detail is focused. The mockup keeps the violet pill.
+private struct SidebarSelectionStyle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { Self.flattenSelection(from: view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { Self.flattenSelection(from: nsView) }
+    }
+
+    private static func flattenSelection(from view: NSView) {
+        guard let content = view.window?.contentView else { return }
+        func walk(_ candidate: NSView) {
+            if let table = candidate as? NSTableView {
+                table.selectionHighlightStyle = .none
+            }
+            candidate.subviews.forEach(walk)
+        }
+        walk(content)
     }
 }
 

@@ -21,6 +21,8 @@ enum ScreenshotSession {
         NSApp.setActivationPolicy(.regular)
         apply(.light, model: model)
         NSApp.activate(ignoringOtherApps: true)
+        enlargeDisplay()
+        await settle(0.4)
         UserDefaults.standard.set(true, forKey: "sidebar.mediaTypesExpanded")
         model.start()
         await settle(0.8)
@@ -59,6 +61,7 @@ enum ScreenshotSession {
             model.inspectorVisible = false
         }
 
+        model.inspectorVisible = false
         model.selectAll()
         model.searchText = "Goa"
         model.find()
@@ -67,6 +70,7 @@ enum ScreenshotSession {
         await settle(0.12)
         prepareWindow()
         capture("03-search-suggestions")
+        model.suggestionEpoch += 1
         resignFocus()
         await model.waitUntilSettled()
         await settle(0.8)
@@ -115,17 +119,25 @@ enum ScreenshotSession {
         capture("07-duplicates")
 
         model.selectAll()
+        await model.waitUntilSettled()
         let sample = Array(model.assets.prefix(4))
         if !sample.isEmpty {
             model.replaceSelection(sample, focused: sample.first)
         }
+        model.inspectorVisible = false
         model.openConvert()
         await settle(0.8)
         prepareWindow()
         capture("07-convert", includeSheet: true)
         model.presentedTool = nil
-        await settle(0.3)
+        await settle(0.4)
 
+        model.selectAll()
+        await model.waitUntilSettled()
+        let pages = Array(model.assets.prefix(4))
+        if !pages.isEmpty {
+            model.replaceSelection(pages, focused: pages.first)
+        }
         model.openPDF()
         await settle(0.8)
         prepareWindow()
@@ -219,13 +231,43 @@ enum ScreenshotSession {
         let window = NSApp.windows.first { $0.canBecomeMain } ?? NSApp.windows.first
         guard let window else { return }
         let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let width = min(1440, visible.width - 16)
-        let height = min(900, visible.height - 16)
+        print("screenshot screen \(Int(visible.width))x\(Int(visible.height))")
+        fflush(stdout)
         window.setFrame(
-            NSRect(x: visible.minX + 8, y: visible.maxY - height - 8, width: width, height: height),
+            NSRect(x: visible.minX, y: visible.maxY - 900, width: 1440, height: 900),
             display: true
         )
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// The runner's display is often smaller than the 1440×900 mockup. Pick a mode that can hold it.
+    private static func enlargeDisplay() {
+        let display = CGMainDisplayID()
+        guard let modes = CGDisplayCopyAllDisplayModes(display, nil) else { return }
+        let count = CFArrayGetCount(modes)
+        var best: CGDisplayMode?
+        var bestArea = Int.max
+        for index in 0..<count {
+            guard let pointer = CFArrayGetValueAtIndex(modes, index) else { continue }
+            let mode = Unmanaged<CGDisplayMode>.fromOpaque(pointer).takeUnretainedValue()
+            let width = mode.width
+            let height = mode.height
+            let area = width * height
+            guard width >= 1440, height >= 900, area < bestArea else { continue }
+            best = mode
+            bestArea = area
+        }
+        guard let best else {
+            print("screenshot display: no mode at least 1440x900")
+            fflush(stdout)
+            return
+        }
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success, let config else { return }
+        CGConfigureDisplayWithDisplayMode(config, display, best, nil)
+        let result = CGCompleteDisplayConfiguration(config, .forSession)
+        print("screenshot display: \(best.width)x\(best.height) result \(result.rawValue)")
+        fflush(stdout)
     }
 
     @MainActor

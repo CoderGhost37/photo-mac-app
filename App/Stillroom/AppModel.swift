@@ -97,6 +97,8 @@ final class AppModel {
     private(set) var searchPlan = SearchPlan.inactive
     var hoveredTextHitID: Int64?
     private(set) var findToken = 0
+    /// Bumped when the search suggestion panel should close.
+    var suggestionEpoch = 0
     var recognizeVideoText = UserDefaults.standard.bool(forKey: AppModel.videoTextKey) {
         didSet {
             UserDefaults.standard.set(recognizeVideoText, forKey: Self.videoTextKey)
@@ -407,6 +409,7 @@ final class AppModel {
     func selectPlaces() {
         hiddenLockPresented = false
         hiddenPromptVisible = false
+        inspectorVisible = false
         browse = .places
         selectedKind = nil
         selectedSubjectID = nil
@@ -451,6 +454,7 @@ final class AppModel {
     func selectDuplicates() {
         hiddenLockPresented = false
         hiddenPromptVisible = false
+        inspectorVisible = false
         browse = .duplicates
         selectedKind = nil
         selectedSubjectID = nil
@@ -1278,6 +1282,7 @@ final class AppModel {
     func selectMemories() {
         hiddenLockPresented = false
         hiddenPromptVisible = false
+        inspectorVisible = false
         browse = .highlights
         selectedKind = nil
         selectedSourceID = nil
@@ -1288,6 +1293,7 @@ final class AppModel {
     func selectPeople() {
         hiddenLockPresented = false
         hiddenPromptVisible = false
+        inspectorVisible = false
         browse = .people
         selectedKind = nil
         selectedDuplicateID = nil

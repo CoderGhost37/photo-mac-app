@@ -14,25 +14,29 @@ struct RootView: View {
             SidebarView(model: model)
                 .navigationSplitViewColumnWidth(min: 216, ideal: 232, max: 280)
         } detail: {
-            detail
-                .navigationTitle("")
-                .toolbar { toolbarContent }
-                .overlay(alignment: .topTrailing) {
-                    if showSuggestions {
-                        SearchSuggestionPanel(model: model) {
-                            suggestionsPinned = false
-                            searchFocused = false
+            HStack(spacing: 0) {
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .topTrailing) {
+                        if showSuggestions {
+                            SearchSuggestionPanel(model: model) {
+                                suggestionsPinned = false
+                                searchFocused = false
+                            }
+                            .padding(.top, 8)
+                            .padding(.trailing, 16)
                         }
-                        .padding(.top, 4)
-                        .padding(.trailing, 16)
                     }
+                if model.inspectorVisible {
+                    Divider()
+                    InspectorView(model: model)
+                        .frame(width: 300)
                 }
+            }
+            .navigationTitle("")
+            .toolbar { toolbarContent }
         }
         .navigationSplitViewStyle(.balanced)
-        .inspector(isPresented: $model.inspectorVisible) {
-            InspectorView(model: model)
-        }
-        .inspectorColumnWidth(min: 260, ideal: 300, max: 360)
         .tint(Palette.accentColor)
         .toolbarBackground(Palette.canvasColor, for: .windowToolbar)
         .background(Palette.canvasColor.ignoresSafeArea())
@@ -64,6 +68,10 @@ struct RootView: View {
                     suggestionsPinned = true
                 }
             }
+        }
+        .onChange(of: model.suggestionEpoch) { _, _ in
+            suggestionsPinned = false
+            searchFocused = false
         }
         .onChange(of: searchFocused) { _, focused in
             if focused, !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -196,27 +204,26 @@ struct RootView: View {
                 placesTools
             }
         }
-        if model.showsZoom {
-            ToolbarItem(placement: .primaryAction) {
-                zoomSlider
-            }
-        }
-        if showsInspectorButton {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.inspectorVisible.toggle()
-                } label: {
-                    Image(systemName: model.viewerAssetID == nil ? "sidebar.trailing" : "info.circle.fill")
-                }
-                .help(model.inspectorVisible ? "Hide Info" : "Show Info")
-                .foregroundStyle(model.inspectorVisible && model.viewerAssetID != nil ? Palette.accentColor : Palette.inkColor)
-            }
-        }
         ToolbarItem(placement: .primaryAction) {
-            if model.browse == .places, model.viewerAssetID == nil, !model.isSearching {
-                placeSearch
-            } else {
-                librarySearch
+            HStack(spacing: 10) {
+                if model.showsZoom {
+                    zoomSlider
+                }
+                if showsInspectorButton {
+                    Button {
+                        model.inspectorVisible.toggle()
+                    } label: {
+                        Image(systemName: model.viewerAssetID == nil ? "sidebar.trailing" : "info.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(model.inspectorVisible ? "Hide Info" : "Show Info")
+                    .foregroundStyle(model.inspectorVisible && model.viewerAssetID != nil ? Palette.accentColor : Palette.inkColor)
+                }
+                if model.browse == .places, model.viewerAssetID == nil, !model.isSearching {
+                    placeSearch
+                } else {
+                    librarySearch
+                }
             }
         }
     }
