@@ -1,4 +1,5 @@
 import AppKit
+import PhotoIndex
 import SwiftUI
 
 /// Launched only when `STILLROOM_SCREENSHOTS` is set. Seeds a tiny library and writes window PNGs for CI.
