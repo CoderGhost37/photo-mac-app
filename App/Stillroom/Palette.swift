@@ -3,47 +3,65 @@ import PhotoIndex
 import SwiftUI
 
 enum Palette {
-    /// Violet accent. Light #6A45F5, dark #7B5CFF. The asset catalog is the SwiftUI accent.
-    static let accent = dynamic(
-        light: NSColor(srgbRed: 106.0 / 255.0, green: 69.0 / 255.0, blue: 245.0 / 255.0, alpha: 1),
-        dark: NSColor(srgbRed: 123.0 / 255.0, green: 92.0 / 255.0, blue: 1, alpha: 1)
-    )
-    static let secondaryBlue = NSColor(srgbRed: 143.0 / 255.0, green: 179.0 / 255.0, blue: 1, alpha: 1)
-    /// Pink used for favorites and memories. Not for chrome or body text.
-    static let favorite = NSColor(srgbRed: 240.0 / 255.0, green: 111.0 / 255.0, blue: 181.0 / 255.0, alpha: 1)
-    static let navy = NSColor(srgbRed: 10.0 / 255.0, green: 11.0 / 255.0, blue: 36.0 / 255.0, alpha: 1)
-    static let sidebar = NSColor.windowBackgroundColor
-    static let canvas = NSColor.windowBackgroundColor
-    static let inspector = NSColor.controlBackgroundColor
-    static let ink = NSColor.labelColor
-    static let cell = NSColor.quaternaryLabelColor
-
-    static var sidebarColor: Color { Color(nsColor: sidebar) }
-    static var canvasColor: Color { Color(nsColor: canvas) }
-    static var inspectorColor: Color { Color(nsColor: inspector) }
-    static var inkColor: Color { Color(nsColor: ink) }
+    static var canvasColor: Color { Color("Canvas") }
+    static var sidebarColor: Color { Color("Sidebar") }
+    static var raisedColor: Color { Color("Raised") }
+    static var inkColor: Color { Color("Ink") }
+    static var secondaryColor: Color { Color("SecondaryInk") }
+    static var borderColor: Color { Color("Border") }
     static var accentColor: Color { Color.accentColor }
-    static var favoriteColor: Color { Color(nsColor: favorite) }
-    static var secondaryBlueColor: Color { Color(nsColor: secondaryBlue) }
-    /// At most a 4% navy wash over the system window background.
-    static var navyTint: Color { Color(nsColor: navy).opacity(0.04) }
-    static var brandGradient: LinearGradient {
+
+    static var canvasNSColor: NSColor { named("Canvas") }
+    static var inkNSColor: NSColor { named("Ink") }
+
+    /// Simplified stand-in for the mesh-gradient app mark.
+    static var markGradient: LinearGradient {
         LinearGradient(
             colors: [
                 Color(red: 123.0 / 255.0, green: 92.0 / 255.0, blue: 1),
-                Color(nsColor: secondaryBlue),
-                Color(nsColor: favorite)
+                Color(red: 214.0 / 255.0, green: 98.0 / 255.0, blue: 176.0 / 255.0),
+                Color(red: 242.0 / 255.0, green: 140.0 / 255.0, blue: 92.0 / 255.0)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
     }
 
-    private static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
-        NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
-        }
+    private static func named(_ name: String) -> NSColor {
+        NSColor(named: name) ?? .labelColor
     }
+}
+
+enum StillroomFont {
+    /// System text at 20pt and above uses SF Pro Display.
+    static let title = Font.system(size: 22, weight: .semibold)
+    static let section = Font.system(size: 15, weight: .semibold)
+    static let control = Font.system(size: 13)
+    static let controlMedium = Font.system(size: 13, weight: .medium)
+    static let metadata = Font.system(size: 12)
+    static let caption = Font.system(size: 11)
+    static let path = Font.system(size: 11, design: .monospaced)
+}
+
+struct AppMark: View {
+    var size: CGFloat = 64
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+            .fill(Palette.markGradient)
+            .frame(width: size, height: size)
+            .overlay {
+                Text("S")
+                    .font(.system(size: size * 0.48, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .accessibilityLabel("Stillroom")
+    }
+}
+
+enum Metrics {
+    static let gridSpacing: CGFloat = 6
+    static let pageInset: CGFloat = 20
 }
 
 enum Format {
@@ -58,6 +76,16 @@ enum Format {
     static func dimensions(width: Int?, height: Int?) -> String? {
         guard let width, let height, width > 0, height > 0 else { return nil }
         return "\(width) × \(height)"
+    }
+
+    static func megapixels(width: Int?, height: Int?) -> String? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        let value = Double(width * height) / 1_000_000
+        guard value >= 0.1 else { return nil }
+        if value >= 10 {
+            return String(format: "%.0f MP", value.rounded())
+        }
+        return String(format: "%.1f MP", value)
     }
 
     static func duration(_ seconds: TimeInterval) -> String {
@@ -77,6 +105,27 @@ enum Format {
         return dateFormatter.string(from: date)
     }
 
+    static func viewerStamp(_ date: Date?) -> String {
+        guard let date else { return "" }
+        return viewerFormatter.string(from: date)
+    }
+
+    static func longDay(_ date: Date) -> String {
+        longDayFormatter.string(from: date)
+    }
+
+    static func monthYear(_ date: Date) -> String {
+        monthYearFormatter.string(from: date)
+    }
+
+    static func shortMonthDay(_ date: Date) -> String {
+        shortMonthDayFormatter.string(from: date)
+    }
+
+    static func year(_ date: Date) -> String {
+        String(Calendar.current.component(.year, from: date))
+    }
+
     static func coordinate(latitude: Double?, longitude: Double?) -> String? {
         guard let latitude, let longitude else { return nil }
         return String(format: "%.5f, %.5f", latitude, longitude)
@@ -84,6 +133,9 @@ enum Format {
 
     static func aperture(_ value: Double?) -> String? {
         guard let value, value > 0 else { return nil }
+        if value >= 10 {
+            return String(format: "ƒ/%.0f", value)
+        }
         return String(format: "ƒ/%.1f", value)
     }
 
@@ -114,14 +166,14 @@ enum Format {
         switch kind {
         case .photo: return "photo"
         case .video: return "video"
-        case .screenshot: return "camera.viewfinder"
+        case .screenshot: return "rectangle.dashed"
         case .screenRecording: return "record.circle"
         }
     }
 
     static func sourceSymbol(_ kind: SourceKind) -> String {
         switch kind {
-        case .screenshots: return "camera.viewfinder"
+        case .screenshots: return "rectangle.dashed"
         case .photosLibrary: return "photo.on.rectangle.angled"
         case .downloads: return "arrow.down.circle"
         case .screenRecordings: return "record.circle"
@@ -130,17 +182,26 @@ enum Format {
         }
     }
 
-    static func dayTitle(for date: Date?) -> String {
-        guard let date else { return "No date" }
-        if Calendar.current.isDateInToday(date) { return "Today" }
-        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
-        return dayFormatter.string(from: date)
+    static func fileExtension(_ asset: Asset) -> String? {
+        guard let path = asset.filePath else { return nil }
+        let ext = URL(fileURLWithPath: path).pathExtension
+        return ext.isEmpty ? nil : ext.uppercased()
     }
 
-    static func dayKey(for date: Date?) -> String {
-        guard let date else { return "none" }
-        let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        return "\(parts.year ?? 0)-\(parts.month ?? 0)-\(parts.day ?? 0)"
+    static func fileName(_ asset: Asset) -> String {
+        if let path = asset.filePath {
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+        return Format.mediaTitle(asset.mediaKind)
+    }
+
+    static func folderName(_ asset: Asset) -> String? {
+        guard let path = asset.filePath else { return nil }
+        return URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+    }
+
+    static func countPhrase(_ value: Int, singular: String, plural: String) -> String {
+        "\(count(value)) \(value == 1 ? singular : plural)"
     }
 
     private static let countFormatter: NumberFormatter = {
@@ -156,10 +217,27 @@ enum Format {
         return formatter
     }()
 
-    private static let dayFormatter: DateFormatter = {
+    private static let viewerFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
+        formatter.dateFormat = "MMMM d, yyyy · h:mm a"
+        return formatter
+    }()
+
+    private static let longDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM d, yyyy"
+        return formatter
+    }()
+
+    private static let monthYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter
+    }()
+
+    private static let shortMonthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
         return formatter
     }()
 }

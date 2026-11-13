@@ -14,7 +14,7 @@ struct StillroomApp: App {
                     }
                 }
         }
-        .defaultSize(width: 1280, height: 820)
+        .defaultSize(width: 1440, height: 900)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Add Folder…") {

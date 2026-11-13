@@ -116,6 +116,17 @@ final class ConvertSession {
         inputs.removeAll { $0.id == id }
     }
 
+    func chooseFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Add"
+        panel.message = "Converted files are new copies. Originals are not changed."
+        guard panel.runModal() == .OK else { return }
+        addURLs(panel.urls)
+    }
+
     func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -284,26 +295,72 @@ struct ConvertPanel: View {
     @State private var targeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            dropZone
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Palette.accentColor)
+                    .frame(width: 28, height: 28)
+                    .background(Palette.accentColor.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Convert")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Palette.inkColor)
+                    Text("Create new copies in another format.")
+                        .font(StillroomFont.metadata)
+                        .foregroundStyle(Palette.secondaryColor)
+                }
+                Spacer()
+            }
+            .padding(.bottom, 16)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 10) {
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach(session.inputs) { file in
+                                convertRow(file)
+                            }
+                        }
+                    }
+                    dropZone
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(alignment: .leading, spacing: 16) {
+                    optionCard
+                }
+                .frame(width: 280)
+            }
             if let notice = session.notice {
                 Text(notice)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(StillroomFont.caption)
+                    .foregroundStyle(Palette.secondaryColor)
+                    .padding(.top, 8)
             }
-            fileList
-            formats
-            destination
-            if session.queue.items.isEmpty {
-                summary
-            } else {
+            if !session.queue.items.isEmpty {
                 progress
+                    .padding(.top, 8)
             }
-            buttons
+            HStack {
+                Text("Creates new files. Originals are never changed.")
+                    .font(StillroomFont.caption)
+                    .foregroundStyle(Palette.secondaryColor)
+                Spacer()
+                Button("Cancel") { model.presentedTool = nil }
+                    .keyboardShortcut(.cancelAction)
+                if session.running {
+                    Button("Stop") { session.stop() }
+                } else {
+                    Button(convertTitle) { session.start() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Palette.accentColor)
+                        .disabled(session.inputs.isEmpty || !session.availability(for: session.format).available)
+                }
+            }
+            .padding(.top, 14)
         }
-        .padding(20)
-        .frame(width: 640, height: 720)
+        .padding(22)
+        .frame(width: 860, height: 560)
         .background(Palette.canvasColor)
         .onAppear { session.refreshAvailability() }
         .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
@@ -315,157 +372,169 @@ struct ConvertPanel: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Convert")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Palette.inkColor)
-            Text("Writes a new file. The original stays where it is.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+    private var convertTitle: String {
+        let count = session.inputs.count
+        return count == 1 ? "Convert 1 File" : "Convert \(count) Files"
+    }
+
+    private func convertRow(_ file: ConvertFile) -> some View {
+        HStack(spacing: 10) {
+            ConvertThumb(path: file.path)
+                .frame(width: 54, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(file.displayName)
+                    .font(StillroomFont.controlMedium)
+                    .foregroundStyle(Palette.inkColor)
+                    .lineLimit(1)
+                if let path = file.path, let bytes = fileByteCount(path) {
+                    Text(Format.bytes(bytes))
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
+                }
+            }
+            Spacer(minLength: 4)
+            Button {
+                session.remove(file.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Palette.secondaryColor)
+            }
+            .buttonStyle(.plain)
+            .disabled(session.running)
         }
+        .padding(6)
+        .background(Palette.raisedColor, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var dropZone: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(targeted ? "Drop to add" : "Drop photos or videos")
-                .font(.callout.weight(.medium))
-            Text("Or add the files selected in the grid.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 18))
+                .foregroundStyle(Palette.secondaryColor)
+            Text(targeted ? "Drop to add" : "Drop more files here")
+                .font(StillroomFont.control)
+                .foregroundStyle(Palette.inkColor)
+            Button("Add Files…") { session.chooseFiles() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(session.running)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(
-                    targeted ? Palette.accentColor : Color.secondary.opacity(0.45),
-                    style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                    targeted ? Palette.accentColor : Palette.borderColor,
+                    style: StrokeStyle(lineWidth: 1, dash: [5, 4])
                 )
         )
     }
 
-    private var fileList: some View {
-        ScrollView {
+    private var optionCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
-                if session.inputs.isEmpty {
-                    Text("No files yet.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(session.inputs) { file in
-                    HStack {
-                        Text(file.displayName)
-                            .lineLimit(1)
-                        Spacer()
-                        Button("Remove") { session.remove(file.id) }
-                            .buttonStyle(.borderless)
-                            .disabled(session.running)
+                Text("Output format")
+                    .font(StillroomFont.controlMedium)
+                    .foregroundStyle(Palette.inkColor)
+                Picker("Output format", selection: $session.format) {
+                    ForEach(ConvertFormat.stillTargets) { format in
+                        Text(format.title).tag(format)
+                    }
+                    Divider()
+                    ForEach(ConvertFormat.videoTargets) { format in
+                        Text(format.title).tag(format)
                     }
                 }
+                .pickerStyle(.menu)
+                .disabled(session.running)
+                .labelsHidden()
+                ForEach(session.blockedNotes, id: \.self) { note in
+                    Text(note)
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(height: 120)
-    }
-
-    private var formats: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Images")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            formatRow(ConvertFormat.stillTargets)
-            Text("Video and audio")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            formatRow(ConvertFormat.videoTargets)
-            ForEach(session.blockedNotes, id: \.self) { note in
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Save to")
+                    .font(StillroomFont.controlMedium)
+                    .foregroundStyle(Palette.inkColor)
+                Picker("Save to", selection: $session.besideOriginal) {
+                    Text("Next to originals").tag(true)
+                    Text("Choose folder…").tag(false)
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                .disabled(session.running)
+                if !session.besideOriginal {
+                    Button("Choose Folder…") { session.chooseFolder() }
+                        .disabled(session.running)
+                    Text(session.folderPath ?? "No folder chosen")
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
-        }
-    }
-
-    private func formatRow(_ formats: [ConvertFormat]) -> some View {
-        HStack(spacing: 6) {
-            ForEach(formats) { format in
-                Button(format.title) { session.format = format }
-                    .buttonStyle(.bordered)
-                    .tint(session.format == format ? Palette.accentColor : Color.secondary)
-                    .disabled(!session.canUse(format) || session.running)
-                    .help(help(format))
-            }
-        }
-    }
-
-    private func help(_ format: ConvertFormat) -> String {
-        if let reason = session.availability(for: format).unavailableReason {
-            return reason
-        }
-        return format.detail
-    }
-
-    private var destination: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Picker("Destination", selection: $session.besideOriginal) {
-                Text("Next to each original").tag(true)
-                Text("A folder").tag(false)
-            }
-            .pickerStyle(.radioGroup)
-            .disabled(session.running)
-            HStack {
-                Button("Choose Folder…") { session.chooseFolder() }
-                    .disabled(session.running)
-                Text(session.folderPath ?? "No folder chosen")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Output preview")
+                    .font(StillroomFont.controlMedium)
+                    .foregroundStyle(Palette.inkColor)
+                Text(previewName)
+                    .font(StillroomFont.path)
+                    .foregroundStyle(Palette.secondaryColor)
+                    .lineLimit(2)
                     .truncationMode(.middle)
             }
-        }
-    }
-
-    private var summary: some View {
-        let rows = session.preview()
-        let ready = rows.filter { $0.outputPath != nil }.count
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(ready == 0 ? "Nothing will be written yet." : "\(ready) new file\(ready == 1 ? "" : "s") will be written.")
-                .font(.callout)
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+            let skipped = session.preview().filter { $0.skipReason != nil }
+            ForEach(Array(skipped.enumerated()), id: \.offset) { _, row in
                 if let reason = row.skipReason {
                     Text("\(row.displayName): \(reason)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.raisedColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Palette.borderColor)
+        }
+    }
+
+    private var previewName: String {
+        guard let row = session.preview().first(where: { $0.outputPath != nil }), let path = row.outputPath else {
+            return "—"
+        }
+        return URL(fileURLWithPath: path).lastPathComponent
     }
 
     private var progress: some View {
         VStack(alignment: .leading, spacing: 6) {
             ProgressView(value: session.queue.overallProgress)
+                .tint(Palette.accentColor)
             ForEach(session.queue.items) { item in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(item.title).lineLimit(1)
-                        Spacer()
-                        Text(label(item))
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.callout)
-                    if let detail = item.detail {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(item.state == .failed ? Color.red : Color.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let path = item.outputPath {
-                        Button("Show in Finder") { session.reveal(path) }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                    }
+                HStack {
+                    Text(item.title).lineLimit(1)
+                    Spacer()
+                    Text(label(item))
+                        .foregroundStyle(Palette.secondaryColor)
+                }
+                .font(StillroomFont.caption)
+                if let detail = item.detail {
+                    Text(detail)
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(item.state == .failed ? Color.red : Palette.secondaryColor)
+                }
+                if let path = item.outputPath {
+                    Button("Show in Finder") { session.reveal(path) }
+                        .buttonStyle(.borderless)
+                        .font(StillroomFont.caption)
                 }
             }
         }
@@ -481,19 +550,28 @@ struct ConvertPanel: View {
         }
     }
 
-    private var buttons: some View {
-        HStack {
-            Button("Add Selection") { session.addAssets(model.selectedAssets) }
-                .disabled(model.selectedAssets.isEmpty || session.running)
-            Spacer()
-            if session.running {
-                Button("Stop") { session.stop() }
-            } else {
-                Button("Convert") { session.start() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(session.inputs.isEmpty || !session.availability(for: session.format).available)
+    private func fileByteCount(_ path: String) -> Int64? {
+        let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.fileSizeKey])
+        return values?.fileSize.map(Int64.init)
+    }
+}
+
+private struct ConvertThumb: View {
+    var path: String?
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack {
+            Palette.borderColor.opacity(0.4)
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
             }
-            Button("Close") { model.presentedTool = nil }
+        }
+        .task(id: path) {
+            guard let path else { return }
+            image = NSImage(contentsOf: URL(fileURLWithPath: path))
         }
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// Launched only when `STILLROOM_SCREENSHOTS` is set. Seeds a tiny library and writes window PNGs for CI.
 enum ScreenshotSession {
@@ -14,58 +15,147 @@ enum ScreenshotSession {
     @MainActor
     static func run(model: AppModel) async {
         let watchdog = Task {
-            try? await Task.sleep(nanoseconds: 90_000_000_000)
+            try? await Task.sleep(nanoseconds: 170_000_000_000)
             exit(0)
         }
         NSApp.setActivationPolicy(.regular)
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        apply(.light, model: model)
         NSApp.activate(ignoringOtherApps: true)
         UserDefaults.standard.set(true, forKey: "sidebar.mediaTypesExpanded")
         model.start()
         await settle(0.8)
         prepareWindow()
-        await settle(0.6)
-        capture("empty-state")
+        await settle(0.5)
+        capture("08-first-run")
 
         await model.installScreenshotLibrary()
         model.timelineScale = .days
         model.sort = .newest
+        model.thumbnailSide = 210
         model.selectAll()
         model.inspectorVisible = false
+        model.viewerAssetID = nil
         await model.waitUntilSettled()
-        await settle(1.6)
+        await settle(1.2)
         prepareWindow()
-        capture("all-photos")
-        scrollSidebar(toEnd: true)
+        capture("01-all-photos-light")
+
+        apply(.dark, model: model)
+        await settle(0.7)
+        prepareWindow()
+        capture("01-all-photos-dark")
+        apply(.light, model: model)
         await settle(0.5)
-        capture("sidebar")
-        scrollSidebar(toEnd: false)
-        await settle(0.4)
 
-        model.inspectorVisible = false
-        model.selectPeople()
-        model.highlightedSubjectID = model.subjectClusters.first { !$0.name.isEmpty }?.id ?? model.subjectClusters.first?.id
-        await model.waitUntilSettled()
-        scrollSidebar(toEnd: false)
-        await settle(0.8)
-        prepareWindow()
-        capture("people")
-
-        scrollSidebar(toEnd: false)
         model.selectAll()
         await model.waitUntilSettled()
-        await settle(0.8)
         if let hero = model.assets.first(where: { $0.placeName != nil }) ?? model.assets.first {
-            model.replaceSelection([hero], focused: hero)
+            model.openViewer(hero)
             model.inspectorVisible = true
-            await settle(1.4)
+            await settle(1.2)
             prepareWindow()
-            capture("inspector")
+            capture("02-viewer")
+            model.closeViewer()
+            model.inspectorVisible = false
         }
+
+        model.selectAll()
+        model.searchText = "Goa"
+        model.find()
+        // Search reloads after a short debounce. Capture the suggestion panel
+        // on the current grid, then wait for the filtered results.
+        await settle(0.12)
+        prepareWindow()
+        capture("03-search-suggestions")
+        resignFocus()
+        await model.waitUntilSettled()
+        await settle(0.8)
+        prepareWindow()
+        capture("03-search-results")
+        model.searchText = ""
+        model.searchTokens = []
+        await model.waitUntilSettled()
+
+        model.selectPlaces()
+        await model.waitUntilSettled()
+        await settle(0.8)
+        let goa = model.assets.filter { ($0.placeName ?? "").localizedCaseInsensitiveContains("Goa") }.map(\.id)
+        if !goa.isEmpty {
+            model.focusPlaceCluster(goa)
+        }
+        await model.waitUntilSettled()
+        await settle(0.8)
+        prepareWindow()
+        capture("04-places")
+
+        model.selectPeople()
+        await model.waitUntilSettled()
+        model.highlightedSubjectID = model.subjectClusters.first { !$0.name.isEmpty }?.id ?? model.subjectClusters.first?.id
+        await settle(0.6)
+        prepareWindow()
+        capture("05-people-pets")
+        if let named = model.subjectClusters.first(where: { !$0.name.isEmpty }) ?? model.subjectClusters.first {
+            model.openSubject(named.id)
+            await model.waitUntilSettled()
+            await settle(0.6)
+            prepareWindow()
+            capture("05-person")
+        }
+
+        model.selectMemories()
+        await model.waitUntilSettled()
+        await settle(0.7)
+        prepareWindow()
+        capture("06-memories")
+
+        model.selectDuplicates()
+        await model.waitUntilSettled()
+        await settle(0.6)
+        prepareWindow()
+        capture("07-duplicates")
+
+        model.selectAll()
+        let sample = Array(model.assets.prefix(4))
+        if !sample.isEmpty {
+            model.replaceSelection(sample, focused: sample.first)
+        }
+        model.openConvert()
+        await settle(0.8)
+        prepareWindow()
+        capture("07-convert", includeSheet: true)
+        model.presentedTool = nil
+        await settle(0.3)
+
+        model.openPDF()
+        await settle(0.8)
+        prepareWindow()
+        capture("07-make-pdf", includeSheet: true)
+        model.presentedTool = nil
+        await settle(0.3)
+
+        model.selectHidden()
+        await settle(0.5)
+        prepareWindow()
+        capture("09-hidden-locked")
 
         watchdog.cancel()
         NSApp.terminate(nil)
         exit(0)
+    }
+
+    @MainActor
+    private static func apply(_ scheme: ColorScheme, model: AppModel) {
+        model.forcedColorScheme = scheme
+        let name: NSAppearance.Name = scheme == .dark ? .darkAqua : .aqua
+        NSApp.appearance = NSAppearance(named: name)
+        for window in NSApp.windows {
+            window.appearance = NSAppearance(named: name)
+        }
+    }
+
+    @MainActor
+    private static func resignFocus() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
     static func fixtures(now: Date) -> [(String, NSColor, NSSize, Date, String?)] {
@@ -128,45 +218,18 @@ enum ScreenshotSession {
         NSApp.activate(ignoringOtherApps: true)
         let window = NSApp.windows.first { $0.canBecomeMain } ?? NSApp.windows.first
         guard let window else { return }
-        window.appearance = NSAppearance(named: .darkAqua)
         let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let width = min(1280, visible.width - 16)
-        let height = min(820, visible.height - 16)
+        let width = min(1440, visible.width - 16)
+        let height = min(900, visible.height - 16)
         window.setFrame(
-            NSRect(x: visible.minX + 8, y: visible.minY + 8, width: width, height: height),
+            NSRect(x: visible.minX + 8, y: visible.maxY - height - 8, width: width, height: height),
             display: true
         )
         window.makeKeyAndOrderFront(nil)
     }
 
     @MainActor
-    private static func scrollSidebar(toEnd: Bool) {
-        guard let content = (NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible })?.contentView else { return }
-        func walk(_ view: NSView) {
-            if let scroll = view as? NSScrollView,
-               scroll.frame.width < 420,
-               scroll.frame.height > 180,
-               let document = scroll.documentView {
-                let clip = scroll.contentView
-                let maxOffset = max(0, document.bounds.height - clip.bounds.height)
-                let y: CGFloat
-                if clip.isFlipped {
-                    y = toEnd ? maxOffset : 0
-                } else {
-                    y = toEnd ? 0 : maxOffset
-                }
-                clip.scroll(to: NSPoint(x: 0, y: y))
-                scroll.reflectScrolledClipView(clip)
-                let anchorY = toEnd ? document.bounds.maxY - 1 : document.bounds.minY
-                document.scrollToVisible(NSRect(x: 0, y: anchorY, width: 1, height: 1))
-            }
-            view.subviews.forEach(walk)
-        }
-        walk(content)
-    }
-
-    @MainActor
-    private static func capture(_ name: String) {
+    private static func capture(_ name: String, includeSheet: Bool = false) {
         guard let directory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var chosen: CGImage?
@@ -177,22 +240,57 @@ enum ScreenshotSession {
                 ?? NSApp.windows.first(where: \.isVisible),
                   let image = windowImage(window),
                   isUsableWindowShot(image) else { continue }
-            chosen = image
+            if includeSheet, let sheet = sheetWindow(), let sheetImage = windowImage(sheet) {
+                chosen = composite(base: image, overlay: sheetImage) ?? image
+            } else {
+                chosen = image
+            }
             break
         }
-        guard var image = chosen else {
+        guard let image = chosen else {
             print("screenshot \(name): no composited window image")
             fflush(stdout)
             return
-        }
-        if name == "sidebar" {
-            image = cropSidebar(image) ?? image
         }
         let url = directory.appendingPathComponent("\(name).png")
         guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
         try? data.write(to: url)
         print("screenshot \(name): \(image.width)x\(image.height)")
         fflush(stdout)
+    }
+
+    @MainActor
+    private static func sheetWindow() -> NSWindow? {
+        let main = NSApp.windows.first { $0.canBecomeMain && $0.isVisible }
+        if let sheet = main?.attachedSheet ?? main?.sheets.first { return sheet }
+        return NSApp.windows.first { $0.isVisible && $0.isSheet }
+    }
+
+    private static func composite(base: CGImage, overlay: CGImage) -> CGImage? {
+        let width = base.width
+        let height = base.height
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(base, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let scale = min(1, Double(width) * 0.78 / Double(overlay.width), Double(height) * 0.82 / Double(overlay.height))
+        let drawnWidth = Double(overlay.width) * scale
+        let drawnHeight = Double(overlay.height) * scale
+        let rect = CGRect(
+            x: (Double(width) - drawnWidth) / 2,
+            y: (Double(height) - drawnHeight) / 2,
+            width: drawnWidth,
+            height: drawnHeight
+        )
+        context.setShadow(offset: CGSize(width: 0, height: -6), blur: 18, color: CGColor(gray: 0, alpha: 0.28))
+        context.draw(overlay, in: rect)
+        return context.makeImage()
     }
 
     private static func windowImage(_ window: NSWindow) -> CGImage? {
@@ -228,14 +326,16 @@ enum ScreenshotSession {
         return yellow(sample(4, 4))
     }
 
-    /// Window-server shots of an uncomposited sidebar come back white, and a missed surface is a rainbow edge.
+    /// A missed surface is flat white, and an uncomposited edge is a rainbow.
     private static func isUsableWindowShot(_ image: CGImage) -> Bool {
         guard image.width > 400, image.height > 300, !isPlaceholder(image) else { return false }
-        let side = averageColor(image, x: max(24, image.width / 12), y: image.height / 2)
-        if side.0 > 200 && side.1 > 200 && side.2 > 200 { return false }
         let edge = averageColor(image, x: image.width - 16, y: image.height / 2)
         let spread = max(edge.0, edge.1, edge.2) - min(edge.0, edge.1, edge.2)
         if spread > 90 && max(edge.0, edge.1, edge.2) > 120 { return false }
+        let left = averageColor(image, x: max(24, image.width / 10), y: image.height / 2)
+        let right = averageColor(image, x: image.width * 2 / 3, y: image.height / 3)
+        let delta = abs(left.0 - right.0) + abs(left.1 - right.1) + abs(left.2 - right.2)
+        if delta < 8 && left.0 > 245 && left.1 > 245 && left.2 > 245 { return false }
         return true
     }
 
@@ -260,11 +360,6 @@ enum ScreenshotSession {
         }
         guard count > 0 else { return (0, 0, 0) }
         return (total.0 / count, total.1 / count, total.2 / count)
-    }
-
-    private static func cropSidebar(_ image: CGImage) -> CGImage? {
-        let cropWidth = max(1, min(image.width, Int(Double(image.width) * 0.30)))
-        return image.cropping(to: CGRect(x: 0, y: 0, width: cropWidth, height: image.height))
     }
 
     private static func settle(_ seconds: Double) async {

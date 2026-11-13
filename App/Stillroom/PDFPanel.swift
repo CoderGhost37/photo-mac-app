@@ -177,6 +177,17 @@ final class PDFSession {
         nameTouched = true
     }
 
+    func chooseFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Add"
+        panel.message = "The PDF is a new file. Originals are not changed."
+        guard panel.runModal() == .OK else { return }
+        addURLs(panel.urls)
+    }
+
     func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -365,43 +376,58 @@ struct PDFPanel: View {
     var model: AppModel
     @Bindable var session: PDFSession
     @State private var targeted = false
+    @State private var selectedPageID: String?
+    @State private var cropping = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("PDF")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Palette.inkColor)
-            Text("One photo per page, or several PDFs joined into a new file. Nothing you drop is modified.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Picker("Tool", selection: $session.mode) {
-                ForEach(PDFMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Make PDF")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Palette.inkColor)
+                Spacer()
+                HStack(spacing: 2) {
+                    modeButton(.photos)
+                    modeButton(.merge)
                 }
+                .padding(3)
+                .background(Palette.inkColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            dropZone
             if let notice = session.notice {
                 Text(notice)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(StillroomFont.caption)
+                    .foregroundStyle(Palette.secondaryColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if session.mode == .photos {
-                photoOptions
-                pageList
-            } else {
-                pdfList
+            HStack(alignment: .top, spacing: 18) {
+                if session.mode == .photos {
+                    previewColumn
+                } else {
+                    mergeColumn
+                }
+                optionsColumn
+                    .frame(width: 280)
             }
-            destination
             if !session.queue.items.isEmpty {
                 progress
             }
-            buttons
+            HStack {
+                Spacer()
+                Button("Cancel") { model.presentedTool = nil }
+                    .keyboardShortcut(.cancelAction)
+                if session.running {
+                    Button("Stop") { session.stop() }
+                } else {
+                    Button("Create PDF") { session.start() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Palette.accentColor)
+                        .disabled(session.mode == .photos ? session.pages.isEmpty : session.pdfs.isEmpty)
+                }
+            }
         }
-        .padding(20)
-        .frame(width: 680, height: 760)
+        .padding(22)
+        .frame(width: 920, height: 640)
         .background(Palette.canvasColor)
         .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
             Task {
@@ -410,104 +436,270 @@ struct PDFPanel: View {
             }
             return true
         }
+        .onAppear {
+            selectedPageID = session.pages.first?.id
+        }
+        .onChange(of: session.pages.map(\.id)) { _, ids in
+            if selectedPageID == nil || !ids.contains(selectedPageID ?? "") {
+                selectedPageID = ids.first
+            }
+        }
     }
 
-    private var dropZone: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(targeted ? "Drop to add" : (session.mode == .photos ? "Drop photos" : "Drop PDFs"))
-                .font(.callout.weight(.medium))
-            HStack(spacing: 12) {
-                Text("Scan with iPhone uses Continuity Camera when a phone is nearby on the same Apple ID.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private func modeButton(_ mode: PDFMode) -> some View {
+        let on = session.mode == mode
+        return Button {
+            session.mode = mode
+        } label: {
+            Text(mode.title)
+                .font(StillroomFont.controlMedium)
+                .foregroundStyle(on ? Color.white : Palette.inkColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Palette.accentColor)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var previewColumn: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    guard let id = activePageID else { return }
+                    session.rotate(id, clockwise: false)
+                } label: {
+                    Label("Rotate", systemImage: "rotate.left")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button {
+                    cropping.toggle()
+                } label: {
+                    Label("Crop", systemImage: "crop")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(cropping ? Palette.accentColor : nil)
+                Spacer()
+            }
+            .disabled(session.running || activePageID == nil)
+            pagePreview
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if cropping, let page = activePage {
+                HStack {
+                    insetSlider("L", page, \.left)
+                    insetSlider("R", page, \.right)
+                    insetSlider("T", page, \.top)
+                    insetSlider("B", page, \.bottom)
+                }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(session.pages.enumerated()), id: \.element.id) { index, page in
+                        VStack(spacing: 4) {
+                            PDFPageThumb(url: page.url)
+                                .frame(width: 54, height: 70)
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .strokeBorder(selectedPageID == page.id ? Palette.accentColor : Palette.borderColor, lineWidth: selectedPageID == page.id ? 2 : 1)
+                                }
+                                .onTapGesture { selectedPageID = page.id }
+                            Text("\(index + 1)")
+                                .font(StillroomFont.caption)
+                                .foregroundStyle(Palette.secondaryColor)
+                        }
+                        .contextMenu {
+                            Button("Move Up") { session.movePage(page.id, up: true) }
+                            Button("Move Down") { session.movePage(page.id, up: false) }
+                            Button("Remove") { session.removePage(page.id) }
+                        }
+                    }
+                    Button("Add Photos…") { session.chooseFiles() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(session.running)
+                }
+            }
+            HStack {
+                Text("\(Format.countPhrase(session.pages.count, singular: "page", plural: "pages")) · Original files stay untouched.")
+                    .font(StillroomFont.caption)
+                    .foregroundStyle(Palette.secondaryColor)
+                Spacer()
                 ContinuityScanButton { urls in
                     session.addScans(urls)
                 }
-                .frame(width: 150, height: 28)
+                .frame(width: 140, height: 24)
+                .help("Scan with iPhone when a phone on the same Apple ID is nearby.")
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(
-                    targeted ? Palette.accentColor : Color.secondary.opacity(0.45),
-                    style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
-                )
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var photoOptions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Picker("Page", selection: $session.paper) {
-                    ForEach(PDFPaper.allCases) { paper in
-                        Text(paper.title).tag(paper)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
-                Picker("Order", selection: $session.order) {
-                    ForEach(PDFPageOrder.allCases) { order in
-                        Text(order.title).tag(order)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
+    private var pagePreview: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Palette.raisedColor)
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
+            if let page = activePage {
+                PDFPageThumb(url: page.url)
+                    .rotationEffect(rotation(page.rotation))
+                    .padding(18)
+            } else {
+                Text(targeted ? "Drop photos" : "Add photos to start")
+                    .font(StillroomFont.metadata)
+                    .foregroundStyle(Palette.secondaryColor)
             }
-            Toggle("Searchable text", isOn: $session.recognizeText)
-                .help("Reads the page on this Mac and embeds the words so they can be selected. Nothing is uploaded.")
-            Toggle("Straighten documents", isOn: $session.cleanUp)
-                .help("Looks for a page, corrects its perspective, and raises contrast. This runs before the crop.")
-            TextField("File name", text: Binding(get: { session.fileName }, set: { session.setFileName($0) }))
-                .textFieldStyle(.roundedBorder)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Palette.borderColor)
+        }
+    }
+
+    private var mergeColumn: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if session.pdfs.isEmpty {
+                Text("No PDFs yet. Drop them here, or add files. They join in the order listed.")
+                    .font(StillroomFont.metadata)
+                    .foregroundStyle(Palette.secondaryColor)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(session.pdfs) { file in
+                        HStack {
+                            Image(systemName: "doc.richtext")
+                                .foregroundStyle(Palette.accentColor)
+                            Text(file.displayName).lineLimit(1)
+                            Spacer()
+                            Button("Up") { session.movePDF(file.id, up: true) }
+                            Button("Down") { session.movePDF(file.id, up: false) }
+                            Button {
+                                session.removePDF(file.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                            }
+                        }
+                        .font(StillroomFont.control)
+                        .buttonStyle(.borderless)
+                        .padding(8)
+                        .background(Palette.raisedColor, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
+            Button("Add PDFs…") { session.chooseFiles() }
+                .buttonStyle(.bordered)
+                .disabled(session.running)
+            Text("Original files stay untouched.")
+                .font(StillroomFont.caption)
+                .foregroundStyle(Palette.secondaryColor)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var optionsColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            field("File name") {
+                TextField("File name", text: Binding(get: { session.fileName }, set: { session.setFileName($0) }))
+                    .textFieldStyle(.roundedBorder)
+            }
+            if session.mode == .photos {
+                field("Paper size") {
+                    Picker("Paper size", selection: $session.paper) {
+                        ForEach(PDFPaper.allCases) { paper in
+                            Text(paper == .fit ? "Fit to photo" : paper.title).tag(paper)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+                field("Page order") {
+                    Picker("Page order", selection: $session.order) {
+                        Text("Listed order").tag(PDFPageOrder.listed)
+                        Text("Name").tag(PDFPageOrder.name)
+                        Text("Date").tag(PDFPageOrder.date)
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+                Toggle("Recognize text (OCR)", isOn: $session.recognizeText)
+                    .font(StillroomFont.control)
+                    .help("Reads the page on this Mac and embeds the words so they can be selected. Nothing is uploaded.")
+                Toggle("Clean up scans", isOn: $session.cleanUp)
+                    .font(StillroomFont.control)
+                    .help("Looks for a page, corrects its perspective, and raises contrast. This runs before the crop.")
+            }
+            field("Destination") {
+                Picker("Destination", selection: $session.besideOriginal) {
+                    Text("Choose folder…").tag(false)
+                    Text("Next to first original").tag(true)
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                if !session.besideOriginal {
+                    Button("Choose Folder…") { session.chooseFolder() }
+                    Text(folderLabel)
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Palette.raisedColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Palette.borderColor)
         }
         .disabled(session.running)
     }
 
-    private var pageList: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if session.pages.isEmpty {
-                    Text("No pages yet.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(session.pages) { page in
-                    pageRow(page)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(StillroomFont.controlMedium)
+                .foregroundStyle(Palette.inkColor)
+            content()
         }
-        .frame(maxHeight: .infinity)
     }
 
-    private func pageRow(_ page: PDFPageDraft) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(page.displayName).lineLimit(1)
-                Spacer()
-                Button("Up") { session.movePage(page.id, up: true) }
-                Button("Down") { session.movePage(page.id, up: false) }
-                Button("Left") { session.rotate(page.id, clockwise: false) }
-                Button("Right") { session.rotate(page.id, clockwise: true) }
-                Button("Remove") { session.removePage(page.id) }
-            }
-            .buttonStyle(.borderless)
-            HStack {
-                Text("Crop")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                insetSlider("L", page, \.left)
-                insetSlider("R", page, \.right)
-                insetSlider("T", page, \.top)
-                insetSlider("B", page, \.bottom)
-            }
+    private var folderLabel: String {
+        guard let path = session.folderPath, !path.isEmpty else { return "No folder chosen" }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    private var activePageID: String? {
+        if let selectedPageID, session.pages.contains(where: { $0.id == selectedPageID }) {
+            return selectedPageID
+        }
+        return session.pages.first?.id
+    }
+
+    private var activePage: PDFPageDraft? {
+        guard let id = activePageID else { return nil }
+        return session.pages.first { $0.id == id }
+    }
+
+    private func rotation(_ turns: QuarterTurns) -> Angle {
+        switch turns {
+        case .none: return .zero
+        case .clockwise: return .degrees(90)
+        case .half: return .degrees(180)
+        case .counterClockwise: return .degrees(-90)
         }
     }
 
     private func insetSlider(_ label: String, _ page: PDFPageDraft, _ key: WritableKeyPath<CropInsets, Double>) -> some View {
         HStack(spacing: 4) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(label).font(StillroomFont.caption).foregroundStyle(Palette.secondaryColor)
             Slider(
                 value: Binding(
                     get: { session.pages.first { $0.id == page.id }?.insets[keyPath: key] ?? 0 },
@@ -515,90 +707,53 @@ struct PDFPanel: View {
                 ),
                 in: 0...0.45
             )
-        }
-    }
-
-    private var pdfList: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
-                if session.pdfs.isEmpty {
-                    Text("No PDFs yet. Pages stay in the order listed here.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(session.pdfs) { file in
-                    HStack {
-                        Text(file.displayName).lineLimit(1)
-                        Spacer()
-                        Button("Up") { session.movePDF(file.id, up: true) }
-                        Button("Down") { session.movePDF(file.id, up: false) }
-                        Button("Remove") { session.removePDF(file.id) }
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxHeight: .infinity)
-    }
-
-    private var destination: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Picker("Destination", selection: $session.besideOriginal) {
-                Text("Next to the first file").tag(true)
-                Text("A folder").tag(false)
-            }
-            .pickerStyle(.radioGroup)
-            .disabled(session.running)
-            HStack {
-                Button("Choose Folder…") { session.chooseFolder() }
-                    .disabled(session.running)
-                Text(session.folderPath ?? "No folder chosen")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+            .tint(Palette.accentColor)
         }
     }
 
     private var progress: some View {
         VStack(alignment: .leading, spacing: 4) {
             ProgressView(value: session.queue.overallProgress)
+                .tint(Palette.accentColor)
             ForEach(session.queue.items) { item in
                 HStack {
                     Text(item.title).lineLimit(1)
                     Spacer()
                     Text(item.state == .failed ? "Failed" : (item.state == .succeeded ? "Done" : "Working"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.secondaryColor)
                 }
-                .font(.callout)
+                .font(StillroomFont.caption)
                 if let detail = item.detail {
                     Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(item.state == .failed ? Color.red : Color.secondary)
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(item.state == .failed ? Color.red : Palette.secondaryColor)
                 }
                 if let path = item.outputPath {
                     Button("Show in Finder") { session.reveal(path) }
                         .buttonStyle(.borderless)
-                        .font(.caption)
+                        .font(StillroomFont.caption)
                 }
             }
         }
     }
+}
 
-    private var buttons: some View {
-        HStack {
-            Button("Add Selection") { session.addAssets(model.selectedAssets) }
-                .disabled(model.selectedAssets.isEmpty || session.running)
-            Spacer()
-            if session.running {
-                Button("Stop") { session.stop() }
-            } else {
-                Button("Export PDF") { session.start() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(session.mode == .photos ? session.pages.isEmpty : session.pdfs.isEmpty)
+private struct PDFPageThumb: View {
+    var url: URL?
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack {
+            Palette.borderColor.opacity(0.25)
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
             }
-            Button("Close") { model.presentedTool = nil }
+        }
+        .task(id: url?.path) {
+            guard let url else { return }
+            image = NSImage(contentsOf: url)
         }
     }
 }

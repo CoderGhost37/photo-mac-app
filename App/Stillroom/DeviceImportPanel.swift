@@ -16,10 +16,11 @@ struct DeviceImportPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Import from iPhone")
-                .font(.title3.weight(.semibold))
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Palette.inkColor)
             Text("Stillroom copies photos and videos into a folder you choose, in year and month folders. Files already imported are skipped. Nothing is deleted from the device.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(StillroomFont.metadata)
+                .foregroundStyle(Palette.secondaryColor)
                 .fixedSize(horizontal: false, vertical: true)
 
             if session.devices.isEmpty {
@@ -57,6 +58,8 @@ struct DeviceImportPanel: View {
                 Button(session.running ? "Copying…" : "Import") {
                     session.beginImport(model: model)
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.accentColor)
                 .disabled(session.folderPath == nil || session.fileCount == 0 || session.running || session.selectedIsRestricted)
                 Spacer()
                 Button("Close") {
@@ -67,6 +70,7 @@ struct DeviceImportPanel: View {
         }
         .padding(20)
         .frame(width: 520)
+        .background(Palette.canvasColor)
         .onAppear { session.start() }
         .onDisappear { session.stop() }
     }
