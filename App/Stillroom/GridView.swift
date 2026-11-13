@@ -630,7 +630,8 @@ struct GridView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .help("Play")
         }
-        .frame(minHeight: tall ? 240 : 168)
+        .frame(maxWidth: .infinity)
+        .frame(height: tall ? 250 : 168)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onTapGesture { model.showStory(story) }

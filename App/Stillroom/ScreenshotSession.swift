@@ -83,9 +83,15 @@ enum ScreenshotSession {
         model.selectPlaces()
         await model.waitUntilSettled()
         await settle(0.8)
-        let goa = model.assets.filter { ($0.placeName ?? "").localizedCaseInsensitiveContains("Goa") }.map(\.id)
-        if !goa.isEmpty {
-            model.focusPlaceCluster(goa)
+        if let fitted = MapGrid.fittingSpan(for: model.mapPoints) {
+            let clusters = MapGrid.cluster(
+                model.mapPoints,
+                latitudeSpan: fitted.latitudeDelta,
+                longitudeSpan: fitted.longitudeDelta
+            )
+            if let cluster = clusters.max(by: { $0.count < $1.count }) {
+                model.focusPlaceCluster(cluster.memberIDs)
+            }
         }
         await model.waitUntilSettled()
         await settle(0.8)
@@ -253,7 +259,7 @@ enum ScreenshotSession {
             let width = mode.width
             let height = mode.height
             let area = width * height
-            guard width >= 1440, height >= 900, area < bestArea else { continue }
+            guard width >= 1600, height >= 1080, area < bestArea else { continue }
             best = mode
             bestArea = area
         }
