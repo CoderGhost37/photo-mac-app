@@ -4,79 +4,34 @@ import SwiftUI
 
 struct SidebarView: View {
     @Bindable var model: AppModel
-    @AppStorage("sidebar.mediaTypesExpanded") private var mediaTypesExpanded = true
-    @AppStorage("sidebar.memoriesExpanded") private var memoriesExpanded = true
-    @AppStorage("sidebar.utilitiesExpanded") private var utilitiesExpanded = true
-    @AppStorage("sidebar.sourcesExpanded") private var sourcesExpanded = true
 
     var body: some View {
         VStack(spacing: 0) {
             List(selection: selection) {
                 Section("Library") {
-                    Label("All Photos", systemImage: "photo.on.rectangle")
-                        .badge(model.counts.enabledTotal)
-                        .tag(SidebarSelection.all)
-                    Label {
-                        Text("Favorites")
-                    } icon: {
-                        Image(systemName: "heart.fill")
-                            .foregroundStyle(Palette.favoriteColor)
-                    }
-                    .badge(model.counts.favoriteCount)
-                    .tag(SidebarSelection.favorites)
-                    Label("Recents", systemImage: "clock")
-                        .badge(model.recentCount)
-                        .tag(SidebarSelection.recents)
+                    row("All Photos", systemImage: "photo.on.rectangle", tag: .all)
+                    row("Favorites", systemImage: "heart", tag: .favorites)
+                    row("Recents", systemImage: "clock", tag: .recents)
                 }
 
-                Section("Media Types", isExpanded: $mediaTypesExpanded) {
+                Section("Media Types") {
                     ForEach(MediaKind.allCases, id: \.self) { kind in
-                        Label(Format.mediaTitle(kind), systemImage: Format.mediaSymbol(kind))
-                            .badge(model.counts.byMediaKind[kind] ?? 0)
-                            .tag(SidebarSelection.kind(kind))
+                        row(Format.mediaTitle(kind), systemImage: Format.mediaSymbol(kind), tag: .kind(kind))
                     }
                 }
 
-                Section("Places") {
-                    Label("Map", systemImage: "map")
-                        .badge(model.mapPoints.count)
-                        .tag(SidebarSelection.map)
+                Section("Explore") {
+                    row("Places", systemImage: "mappin.and.ellipse", tag: .map)
+                    row("People & Pets", systemImage: "person.2", tag: .people)
+                    row("Memories", systemImage: "rectangle.stack", tag: .memories)
                 }
 
-                Section("People & Pets") {
-                    Label("People & Pets", systemImage: "person.2")
-                        .badge(model.subjectClusters.count)
-                        .tag(SidebarSelection.people)
-                }
-
-                Section("Memories", isExpanded: $memoriesExpanded) {
-                    if model.sidebarStories.isEmpty {
-                        Text("No memories yet")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    ForEach(model.sidebarStories) { story in
-                        Label {
-                            Text(story.kind == .forYou ? "For You" : story.title)
-                        } icon: {
-                            Image(systemName: symbol(for: story.kind))
-                                .foregroundStyle(Palette.favoriteColor)
-                        }
-                        .badge(story.count)
-                        .tag(SidebarSelection.story(story.id))
-                    }
-                }
-
-                Section("Utilities", isExpanded: $utilitiesExpanded) {
-                    Label("Duplicates", systemImage: "square.on.square")
-                        .badge(model.duplicateGroups.count)
-                        .tag(SidebarSelection.duplicates)
+                Section("Utilities") {
+                    row("Duplicates", systemImage: "square.on.square", tag: .duplicates)
                     Button {
                         model.openConvert()
                     } label: {
                         Label("Convert", systemImage: "arrow.triangle.2.circlepath")
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .help("Convert selected files, or drop files in the panel")
@@ -84,77 +39,87 @@ struct SidebarView: View {
                         model.openPDF()
                     } label: {
                         Label("Make PDF", systemImage: "doc.richtext")
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .help("Make a PDF from the selection, or drop files in the panel")
-                    Label {
-                        Text("Hidden")
-                    } icon: {
-                        Image(systemName: model.hiddenUnlocked ? "lock.open" : "lock")
-                    }
-                    .badge(model.counts.hiddenCount)
-                    .tag(SidebarSelection.hidden)
+                    row("Hidden", systemImage: model.hiddenUnlocked ? "lock.open" : "lock", tag: .hidden)
                 }
 
-                Section("Sources", isExpanded: $sourcesExpanded) {
+                Section("Sources") {
                     ForEach(model.sources) { source in
-                        let count = model.counts.bySource[source.id] ?? 0
-                        HStack(spacing: 8) {
-                            Label(source.displayName, systemImage: Format.sourceSymbol(source.kind))
-                                .foregroundStyle(source.enabled ? .primary : .secondary)
-                                .lineLimit(1)
-                            Spacer(minLength: 8)
-                            if count > 0 {
-                                Text(Format.count(count))
-                                    .font(.body.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                            }
-                            Toggle(
-                                source.enabled ? "Included in the library" : "Turn on to index this source",
-                                isOn: Binding(
-                                    get: { source.enabled },
-                                    set: { model.setEnabled($0, sourceID: source.id) }
-                                )
-                            )
-                            .toggleStyle(.switch)
-                            .labelsHidden()
-                            .controlSize(.small)
-                            .help(source.enabled ? "Included in the library" : "Turn on to index this source")
-                        }
-                        .tag(SidebarSelection.source(source.id))
-                        .contextMenu {
-                            if source.kind == .folder {
-                                Button("Remove from Stillroom") {
-                                    model.removeFolder(source)
+                        row(
+                            source.displayName,
+                            systemImage: Format.sourceSymbol(source.kind),
+                            tag: .source(source.id),
+                            tint: source.enabled ? Palette.inkColor : Palette.secondaryColor
+                        )
+                            .contextMenu {
+                                Button(source.enabled ? "Turn Off" : "Turn On") {
+                                    model.setEnabled(!source.enabled, sourceID: source.id)
+                                }
+                                if source.kind == .folder {
+                                    Button("Remove from Stillroom") {
+                                        model.removeFolder(source)
+                                    }
                                 }
                             }
-                        }
                     }
                     Button {
                         model.addFolder()
                     } label: {
                         Label("Add Folder…", systemImage: "folder.badge.plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     Button {
                         model.openImport()
                     } label: {
                         Label("Import from iPhone…", systemImage: "iphone")
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .help("Copy photos from a connected iPhone. Originals on the device stay put.")
                 }
             }
             .listStyle(.sidebar)
-            .font(.body)
+            .font(StillroomFont.control)
+            .scrollContentBackground(.hidden)
+            .tint(Palette.accentColor)
+            .background(SidebarSelectionStyle())
 
             footer
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
         }
+        .background(Palette.sidebarColor)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 6) {
+                    AppMark(size: 18)
+                    Text("Stillroom")
+                        .font(StillroomFont.controlMedium)
+                        .foregroundStyle(Palette.inkColor)
+                }
+                .padding(.trailing, 18)
+            }
+        }
+    }
+
+    private func row(
+        _ title: String,
+        systemImage: String,
+        tag: SidebarSelection,
+        tint: Color = Palette.inkColor
+    ) -> some View {
+        let selected = model.sidebarSelection == tag
+        return Label(title, systemImage: systemImage)
+            .foregroundStyle(selected ? Color.white : tint)
+            .tag(tag)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Palette.accentColor : Color.clear)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1)
+            )
     }
 
     private var selection: Binding<SidebarSelection?> {
@@ -168,63 +133,68 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var footer: some View {
-        switch model.footer {
-        case .current:
-            Label("Library is up to date", systemImage: "checkmark.icloud")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case .indexing(let progress):
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            switch model.footer {
+            case .indexing(let progress):
                 if let progress, progress.total > 0 {
                     ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1)))
-                    Label {
-                        Text("Indexing \(Format.count(progress.completed)) of \(Format.count(progress.total))")
-                    } icon: {
-                        ScanningIcon()
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                        .tint(Palette.accentColor)
+                    Text("Indexing \(Format.count(progress.completed)) of \(Format.count(progress.total))")
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
                 } else {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(model.status)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(model.status)
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
+                        .lineLimit(2)
+                }
+                Text("Runs on this Mac")
+                    .font(StillroomFont.caption)
+                    .foregroundStyle(Palette.secondaryColor)
+            case .message(let text):
+                Text(text)
+                    .font(StillroomFont.caption)
+                    .foregroundStyle(Palette.secondaryColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .current:
+                if model.counts.enabledTotal == 0, !model.sources.contains(where: { $0.kind == .folder }) {
+                    Text("No folders added")
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
+                } else {
+                    Text("Runs on this Mac")
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .message(let text):
-            Label(text, systemImage: model.machinePause == nil ? "exclamationmark.triangle" : "pause.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private func symbol(for kind: HighlightKind) -> String {
-        switch kind {
-        case .forYou: return "sparkles"
-        case .onThisDay, .yearsAgo: return "calendar"
-        case .recentDay: return "clock"
-        case .trip: return "airplane"
-        case .person: return "person.2"
-        case .pet: return "pawprint"
-        case .food: return "fork.knife"
-        case .roulette: return "sparkles"
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct ScanningIcon: View {
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .rotationEffect(.degrees(context.date.timeIntervalSinceReferenceDate * 240))
+/// Sidebar selection is gray once the detail is focused. The mockup keeps the violet pill.
+private struct SidebarSelectionStyle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { Self.flattenSelection(from: view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { Self.flattenSelection(from: nsView) }
+    }
+
+    private static func flattenSelection(from view: NSView) {
+        guard let content = view.window?.contentView else { return }
+        func walk(_ candidate: NSView) {
+            if let table = candidate as? NSTableView {
+                table.selectionHighlightStyle = .none
+            }
+            candidate.subviews.forEach(walk)
         }
+        walk(content)
     }
 }
 
@@ -244,11 +214,11 @@ struct FaceBubble: View {
             } else {
                 Image(systemName: symbol)
                     .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.secondaryColor)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.primary.opacity(0.06))
+        .background(Palette.borderColor.opacity(0.45))
         .clipShape(Circle())
         .task(id: assetID) {
             image = nil

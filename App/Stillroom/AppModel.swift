@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import PhotoIndex
+import SwiftUI
 
 /// UI state for the library window. Indexing runs on a utility queue and only reads files.
 @MainActor
@@ -42,6 +43,16 @@ final class AppModel {
     }
     var sort: LibrarySort = .newest
     var inspectorVisible = false
+    /// Screenshot runs pin light or dark. Nil follows the Mac.
+    var forcedColorScheme: ColorScheme?
+    var hiddenLockPresented = false
+    var hiddenPromptVisible = false
+    var mapUsesSatellite = false
+    var placeQuery = ""
+    var mapFitToken = 0
+    private(set) var placeCounts: [String: Int] = [:]
+    private(set) var libraryMoments: [Date] = []
+    private var inspectorBeforeViewer: Bool?
     private(set) var recentCount = 0
     private(set) var knownPlaces: [String] = []
     private(set) var scanProgress: ScanProgress?
@@ -86,6 +97,8 @@ final class AppModel {
     private(set) var searchPlan = SearchPlan.inactive
     var hoveredTextHitID: Int64?
     private(set) var findToken = 0
+    /// Bumped when the search suggestion panel should close.
+    var suggestionEpoch = 0
     var recognizeVideoText = UserDefaults.standard.bool(forKey: AppModel.videoTextKey) {
         didSet {
             UserDefaults.standard.set(recognizeVideoText, forKey: Self.videoTextKey)
@@ -96,6 +109,8 @@ final class AppModel {
     let pdfSession = PDFSession()
 
     var filterTitle: String {
+        if hiddenLockPresented { return "Hidden" }
+        if isSearching { return "Search" }
         switch browse {
         case .places:
             return "Places"
@@ -136,49 +151,77 @@ final class AppModel {
     }
 
     var librarySubtitle: String {
-        if isSearching {
-            return "\(Format.count(matchedCount)) results"
+        if hiddenLockPresented || browse == .hidden || isSearching { return "" }
+        if viewerAssetID != nil { return "" }
+        switch browse {
+        case .places:
+            return "\(Format.countPhrase(mapPoints.count, singular: "photo", plural: "photos")) with a location"
+        case .people:
+            if selectedSubjectID != nil { return "" }
+            let people = subjectClusters.filter { $0.kind == .person }.count
+            let pets = subjectClusters.count - people
+            return "\(Format.countPhrase(people, singular: "person", plural: "people")) · \(Format.countPhrase(pets, singular: "pet", plural: "pets"))"
+        case .highlights:
+            return shownStory == nil ? "Made from your library" : ""
+        case .duplicates:
+            let photos = duplicateGroups.reduce(0) { $0 + $1.count }
+            return "\(Format.countPhrase(duplicateGroups.count, singular: "group", plural: "groups")) · \(Format.countPhrase(photos, singular: "photo", plural: "photos"))"
+        case .library where selectedKind == nil && selectedSourceID == nil:
+            return mediaSummary
+        case .library, .favorites, .recents, .hidden:
+            return Format.countPhrase(matchedCount, singular: "item", plural: "items")
         }
-        if browse == .people, selectedSubjectID == nil {
-            let noun = subjectClusters.count == 1 ? "person or pet" : "people & pets"
-            return "\(Format.count(subjectClusters.count)) \(noun)"
-        }
-        let noun = matchedCount == 1 ? "item" : "items"
-        return "\(Format.count(matchedCount)) \(noun)"
+    }
+
+    var mediaSummary: String {
+        let photos = (counts.byMediaKind[.photo] ?? 0) + (counts.byMediaKind[.screenshot] ?? 0)
+        let videos = (counts.byMediaKind[.video] ?? 0) + (counts.byMediaKind[.screenRecording] ?? 0)
+        if photos == 0 && videos == 0 { return "0 items" }
+        var parts: [String] = []
+        if photos > 0 { parts.append(Format.countPhrase(photos, singular: "photo", plural: "photos")) }
+        if videos > 0 { parts.append(Format.countPhrase(videos, singular: "video", plural: "videos")) }
+        return parts.joined(separator: " · ")
+    }
+
+    var usesLargeTitle: Bool {
+        if hiddenLockPresented || isSearching || viewerAssetID != nil { return false }
+        if browse == .people, selectedSubjectID != nil { return false }
+        return !librarySubtitle.isEmpty
     }
 
     var showsTimelinePicker: Bool {
-        if isSearching { return false }
+        if hiddenLockPresented { return true }
+        if isSearching || viewerAssetID != nil { return false }
         switch browse {
-        case .library, .favorites, .recents, .places, .hidden:
+        case .library, .favorites, .recents, .hidden:
             return true
-        case .people:
-            return selectedSubjectID != nil
-        case .highlights, .duplicates:
+        case .people, .places, .highlights, .duplicates:
             return false
         }
     }
 
-    var sidebarStories: [HighlightStory] {
-        stories.filter { story in
-            switch story.kind {
-            case .onThisDay, .yearsAgo, .recentDay:
-                return false
-            default:
-                return true
-            }
+    var showsZoom: Bool {
+        if hiddenLockPresented { return true }
+        if isSearching || viewerAssetID != nil { return false }
+        switch browse {
+        case .library, .favorites, .recents, .hidden, .duplicates:
+            return true
+        case .people:
+            return selectedSubjectID != nil
+        case .places, .highlights:
+            return false
         }
     }
 
     var sidebarSelection: SidebarSelection {
+        if hiddenLockPresented { return .hidden }
         switch browse {
         case .favorites: return .favorites
         case .recents: return .recents
         case .places: return .map
         case .people: return .people
         case .highlights:
-            if let selectedStoryID { return .story(selectedStoryID) }
-            return .story(sidebarStories.first?.id ?? "")
+            return .memories
         case .duplicates: return .duplicates
         case .hidden: return .hidden
         case .library:
@@ -220,18 +263,21 @@ final class AppModel {
             guard !name.isEmpty else { continue }
             let folded = name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             guard folded.contains(needle) else { continue }
-            add(LibrarySearchToken(kind: .person, value: name))
+            add(LibrarySearchToken(kind: .person, value: name, count: cluster.count))
             if items.count >= 4 { break }
         }
         for place in knownPlaces {
             let folded = place.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             guard folded.contains(needle) else { continue }
-            add(LibrarySearchToken(kind: .place, value: place))
+            add(LibrarySearchToken(kind: .place, value: place, count: placeCounts[place]))
             if items.count >= 6 { break }
         }
         let plan = SearchPlan.parse(typed)
         if plan.dateRange != nil || !plan.dateTokens.isEmpty {
-            add(LibrarySearchToken(kind: .date, value: typed))
+            let count = plan.dateRange.map { range in
+                libraryMoments.filter { range.contains($0) }.count
+            }
+            add(LibrarySearchToken(kind: .date, value: typed, count: count))
         }
         add(LibrarySearchToken(kind: .text, value: typed))
         return Array(items.prefix(8))
@@ -361,6 +407,9 @@ final class AppModel {
     }
 
     func selectPlaces() {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
+        inspectorVisible = false
         browse = .places
         selectedKind = nil
         selectedSubjectID = nil
@@ -382,7 +431,15 @@ final class AppModel {
         reload()
     }
 
+    func focusPlaceCluster(_ ids: [String]) {
+        placeMemberIDs = ids
+        browse = .places
+        reload()
+    }
+
     func selectSubject(_ id: String) {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
         browse = .people
         selectedKind = nil
         selectedDuplicateID = nil
@@ -395,6 +452,9 @@ final class AppModel {
     }
 
     func selectDuplicates() {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
+        inspectorVisible = false
         browse = .duplicates
         selectedKind = nil
         selectedSubjectID = nil
@@ -408,19 +468,35 @@ final class AppModel {
 
     func selectHidden() {
         if hiddenUnlocked {
+            hiddenLockPresented = false
+            hiddenPromptVisible = false
             showHiddenAlbum()
             return
         }
+        hiddenLockPresented = true
+        hiddenPromptVisible = true
+        inspectorVisible = false
+    }
+
+    func dismissHiddenPrompt() {
+        hiddenPromptVisible = false
+    }
+
+    func unlockHidden() {
+        guard !authenticatingHidden else { return }
         authenticatingHidden = true
         Task {
             let ok = await HiddenAuthentication.unlock()
             authenticatingHidden = false
             if ok {
                 hiddenUnlocked = true
+                hiddenLockPresented = false
+                hiddenPromptVisible = false
                 hiddenActivity = Date()
                 showHiddenAlbum()
             } else {
                 status = "Hidden album stayed locked."
+                hiddenPromptVisible = true
             }
         }
     }
@@ -492,6 +568,8 @@ final class AppModel {
     }
 
     private func showHiddenAlbum() {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
         browse = .hidden
         selectedKind = nil
         selectedSourceID = nil
@@ -503,6 +581,8 @@ final class AppModel {
     private func lockHidden() {
         hiddenUnlocked = false
         hiddenActivity = nil
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
         guard browse == .hidden else { return }
         browse = .library
         selectedSourceID = nil
@@ -548,6 +628,8 @@ final class AppModel {
 
     func play(_ story: HighlightStory) {
         guard !story.assetIDs.isEmpty else { return }
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
         browse = .highlights
         selectedKind = nil
         selectedSubjectID = nil
@@ -966,6 +1048,8 @@ final class AppModel {
     }
 
     private func clearPins() {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
         placeMemberIDs = nil
         selectedSubjectID = nil
         selectedStoryID = nil
@@ -1004,10 +1088,18 @@ final class AppModel {
                 names[cluster.id] = cluster.name
             }
             let stories = HighlightRules.stories(assets: memories, names: names, now: Date(), calendar: .current)
-            let placeNames = Array(Set(memories.compactMap { asset -> String? in
+            var countedPlaces: [String: Int] = [:]
+            var moments: [Date] = []
+            for asset in memories {
+                if let date = asset.createdAt {
+                    moments.append(date)
+                }
                 let trimmed = asset.placeName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                return trimmed.isEmpty ? nil : trimmed
-            })).sorted()
+                if !trimmed.isEmpty {
+                    countedPlaces[trimmed, default: 0] += 1
+                }
+            }
+            let placeNames = countedPlaces.keys.sorted()
             Task { @MainActor in
                 guard let self, generation == self.memoryGeneration else { return }
                 self.subjectClusters = clusters
@@ -1015,6 +1107,8 @@ final class AppModel {
                 self.duplicateGroups = groups
                 self.stories = stories
                 self.knownPlaces = placeNames
+                self.placeCounts = countedPlaces
+                self.libraryMoments = moments
                 if let selectedSubjectID = self.selectedSubjectID, !clusters.contains(where: { $0.id == selectedSubjectID }) {
                     self.selectedSubjectID = nil
                 }
@@ -1185,7 +1279,21 @@ final class AppModel {
         reload()
     }
 
+    func selectMemories() {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
+        inspectorVisible = false
+        browse = .highlights
+        selectedKind = nil
+        selectedSourceID = nil
+        clearPins()
+        reload()
+    }
+
     func selectPeople() {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
+        inspectorVisible = false
         browse = .people
         selectedKind = nil
         selectedDuplicateID = nil
@@ -1198,6 +1306,8 @@ final class AppModel {
     }
 
     func openSubject(_ id: String) {
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
         browse = .people
         selectedKind = nil
         selectedDuplicateID = nil
@@ -1211,6 +1321,8 @@ final class AppModel {
 
     func showStory(_ story: HighlightStory) {
         guard !story.assetIDs.isEmpty else { return }
+        hiddenLockPresented = false
+        hiddenPromptVisible = false
         browse = .highlights
         selectedKind = nil
         selectedSubjectID = nil
@@ -1240,10 +1352,8 @@ final class AppModel {
             selectPlaces()
         case .people:
             selectPeople()
-        case .story(let id):
-            if let story = stories.first(where: { $0.id == id }) ?? sidebarStories.first(where: { $0.id == id }) {
-                showStory(story)
-            }
+        case .memories:
+            selectMemories()
         case .duplicates:
             selectDuplicates()
         case .hidden:
@@ -1296,7 +1406,8 @@ final class AppModel {
     func updateColumnEstimate(width: CGFloat) {
         let side = CGFloat(thumbnailSide)
         guard side > 0, width > 0 else { return }
-        columnEstimate = max(1, Int((width + 2) / (side + 2)))
+        let spacing = Metrics.gridSpacing
+        columnEstimate = max(1, Int((width + spacing) / (side + spacing)))
     }
 
     func visibleSections() -> [TimelineSection] {
@@ -1372,11 +1483,19 @@ final class AppModel {
         if !selectedAssets.contains(where: { $0.id == asset.id }) {
             replaceSelection([asset], focused: asset)
         }
+        if inspectorBeforeViewer == nil {
+            inspectorBeforeViewer = inspectorVisible
+        }
         viewerAssetID = asset.id
+        inspectorVisible = true
     }
 
     func closeViewer() {
         viewerAssetID = nil
+        if let previous = inspectorBeforeViewer {
+            inspectorVisible = previous
+            inspectorBeforeViewer = nil
+        }
     }
 
     func showInfo(_ asset: Asset) {
@@ -1473,15 +1592,29 @@ final class AppModel {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let specs: [(String, NSColor, NSSize, Date, String?)] = ScreenshotSession.fixtures(now: Date())
+            var firstData: Data?
+            var firstDate: Date?
             for spec in specs {
                 let url = folder.appendingPathComponent(spec.0)
                 if let data = ScreenshotSession.jpeg(color: spec.1, size: spec.2) {
+                    if firstData == nil {
+                        firstData = data
+                        firstDate = spec.3
+                    }
                     try data.write(to: url)
                     try FileManager.default.setAttributes(
                         [.creationDate: spec.3, .modificationDate: spec.3],
                         ofItemAtPath: url.path
                     )
                 }
+            }
+            if let firstData, let firstDate {
+                let copy = folder.appendingPathComponent("goa-00-copy.jpg")
+                try firstData.write(to: copy)
+                try FileManager.default.setAttributes(
+                    [.creationDate: firstDate, .modificationDate: firstDate],
+                    ofItemAtPath: copy.path
+                )
             }
         } catch {
             status = error.localizedDescription
@@ -1619,7 +1752,7 @@ enum SidebarSelection: Hashable {
     case kind(MediaKind)
     case map
     case people
-    case story(String)
+    case memories
     case duplicates
     case hidden
     case source(String)
@@ -1635,6 +1768,7 @@ struct LibrarySearchToken: Identifiable, Hashable {
 
     var kind: Kind
     var value: String
+    var count: Int? = nil
     var id: String { "\(kind.rawValue)|\(value)" }
 
     var symbol: String {
@@ -1680,7 +1814,7 @@ enum StillroomPreferences {
 
     static var thumbnailSide: Double {
         let stored = UserDefaults.standard.double(forKey: thumbnailKey)
-        if stored < 80 { return 140 }
+        if stored < 80 { return 210 }
         return min(320, max(80, stored))
     }
 
