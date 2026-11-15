@@ -31,6 +31,10 @@
 		A10000000000000000000054 /* DeviceImportPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* DeviceImportPanel.swift */; };
 		A10000000000000000000055 /* CaptureToolLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* CaptureToolLocator.swift */; };
 		A10000000000000000000056 /* ScreenshotSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* ScreenshotSession.swift */; };
+		B10000000000000000000037 /* ScreenshotCaptureMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000037 /* ScreenshotCaptureMonitor.swift */; };
+		B10000000000000000000038 /* ScreenshotEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000038 /* ScreenshotEditor.swift */; };
+		B10000000000000000000039 /* ScreenshotActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000039 /* ScreenshotActions.swift */; };
+		B10000000000000000000040 /* ScrollingCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000040 /* ScrollingCapture.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +64,10 @@
 		A10000000000000000000034 /* DeviceImportPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceImportPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000035 /* CaptureToolLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureToolLocator.swift; sourceTree = "<group>"; };
 		A10000000000000000000036 /* ScreenshotSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotSession.swift; sourceTree = "<group>"; };
+		A10000000000000000000037 /* ScreenshotCaptureMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotCaptureMonitor.swift; sourceTree = "<group>"; };
+		A10000000000000000000038 /* ScreenshotEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotEditor.swift; sourceTree = "<group>"; };
+		A10000000000000000000039 /* ScreenshotActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotActions.swift; sourceTree = "<group>"; };
+		A10000000000000000000040 /* ScrollingCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollingCapture.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -107,6 +115,10 @@
 				A10000000000000000000034 /* DeviceImportPanel.swift */,
 				A10000000000000000000035 /* CaptureToolLocator.swift */,
 				A10000000000000000000036 /* ScreenshotSession.swift */,
+				A10000000000000000000039 /* ScreenshotActions.swift */,
+				A10000000000000000000040 /* ScrollingCapture.swift */,
+				A10000000000000000000038 /* ScreenshotEditor.swift */,
+				A10000000000000000000037 /* ScreenshotCaptureMonitor.swift */,
 				A10000000000000000000013 /* Assets.xcassets */,
 				A10000000000000000000015 /* Info.plist */,
 				A10000000000000000000016 /* Stillroom.entitlements */,
@@ -192,6 +204,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000000000000000000039 /* ScreenshotActions.swift in Sources */,
+				B10000000000000000000040 /* ScrollingCapture.swift in Sources */,
+				B10000000000000000000038 /* ScreenshotEditor.swift in Sources */,
+				B10000000000000000000037 /* ScreenshotCaptureMonitor.swift in Sources */,
 				A10000000000000000000041 /* StillroomApp.swift in Sources */,
 				A10000000000000000000042 /* AppModel.swift in Sources */,
 				A10000000000000000000043 /* RootView.swift in Sources */,
