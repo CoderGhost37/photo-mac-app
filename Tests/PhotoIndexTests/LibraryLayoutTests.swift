@@ -2,6 +2,29 @@ import XCTest
 @testable import PhotoIndex
 
 final class LibraryLayoutTests: XCTestCase {
+    func testSearchScopesIncludeScreenshotsAndScreenRecordings() {
+        let still = photo(id: "photo", created: date(2026, 1, 1))
+        var screenshot = still; screenshot.id = "screenshot"; screenshot.mediaKind = .screenshot
+        var video = still; video.id = "video"; video.mediaKind = .video
+        var recording = still; recording.id = "recording"; recording.mediaKind = .screenRecording
+        let input = [recording, screenshot, video, still]
+        XCTAssertEqual(SearchResultPresentation.assets(input, scope: .all, order: .relevance).map(\.id), input.map(\.id))
+        XCTAssertEqual(SearchResultPresentation.assets(input, scope: .photos, order: .relevance).map(\.id), ["screenshot", "photo"])
+        XCTAssertEqual(SearchResultPresentation.assets(input, scope: .videos, order: .relevance).map(\.id), ["recording", "video"])
+    }
+
+    func testSearchDateOrderPreservesRankForTies() {
+        let input = [
+            photo(id: "old", created: date(2024, 1, 1)),
+            photo(id: "new-ranked-first", created: date(2026, 1, 1)),
+            photo(id: "undated", created: nil),
+            photo(id: "new-ranked-second", created: date(2026, 1, 1))
+        ]
+        XCTAssertEqual(SearchResultPresentation.assets(input, scope: .all, order: .newest).map(\.id), ["new-ranked-first", "new-ranked-second", "old", "undated"])
+        XCTAssertEqual(SearchResultPresentation.assets(input, scope: .all, order: .oldest).map(\.id), ["undated", "old", "new-ranked-first", "new-ranked-second"])
+        XCTAssertTrue(SearchResultPresentation.assets(input, scope: .videos, order: .newest).isEmpty)
+    }
+
     func testFavoritesStickAcrossRescanAndFilterTheLibrary() throws {
         let database = try IndexDatabase.inMemory()
         try database.save(source: Source(

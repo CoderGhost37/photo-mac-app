@@ -26,10 +26,11 @@ final class ThumbnailService {
     func image(for asset: Asset, pointSize: CGFloat, scale: CGFloat, quality: Quality) async -> NSImage? {
         if Task.isCancelled { return nil }
         let pixel = max(40, Int((pointSize * max(scale, 1) / 40).rounded()) * 40)
-        let token = asset.contentHash
+        let revision = asset.contentHash
             ?? asset.fileMTime.map { String(Int($0.timeIntervalSince1970)) }
             ?? "0"
-        let key = "\(asset.id)|\(pixel)|\(token)|\(quality == .preview ? "p" : "g")" as NSString
+        let token = "v2-\(quality == .preview ? "preview" : "grid")-\(revision)"
+        let key = "\(asset.id)|\(pixel)|\(token)" as NSString
         if let cached = memory.object(forKey: key) {
             return cached
         }
@@ -81,7 +82,7 @@ final class ThumbnailService {
         let side = CGSize(width: pixel, height: pixel)
         return await withCheckedContinuation { continuation in
             let gate = ResumeOnce()
-            photos.requestImage(for: asset, targetSize: side, contentMode: .aspectFill, options: options) { image, _ in
+            photos.requestImage(for: asset, targetSize: side, contentMode: allowNetwork ? .aspectFit : .aspectFill, options: options) { image, _ in
                 gate.run {
                     continuation.resume(returning: image)
                 }
@@ -94,7 +95,7 @@ final class ThumbnailService {
             fileAt: URL(fileURLWithPath: path),
             size: CGSize(width: pointSize, height: pointSize),
             scale: max(scale, 1),
-            representationTypes: quality == .preview ? .thumbnail : .lowQualityThumbnail
+            representationTypes: .thumbnail
         )
         do {
             let representation = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
@@ -106,8 +107,8 @@ final class ThumbnailService {
 
     private func gridOptions(allowNetwork: Bool) -> PHImageRequestOptions {
         let options = PHImageRequestOptions()
-        options.deliveryMode = .fastFormat
-        options.resizeMode = .fast
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
         options.isNetworkAccessAllowed = allowNetwork
         options.isSynchronous = false
         return options
@@ -116,7 +117,7 @@ final class ThumbnailService {
     private func previewOptions() -> PHImageRequestOptions {
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
-        options.resizeMode = .fast
+        options.resizeMode = .exact
         options.isNetworkAccessAllowed = true
         options.isSynchronous = false
         return options

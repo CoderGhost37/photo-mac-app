@@ -8,6 +8,9 @@ struct RootView: View {
     @FocusState private var searchFocused: Bool
     @FocusState private var placeFocused: Bool
     @State private var suggestionsPinned = false
+    @State private var windowWidth: CGFloat = 900
+    @State private var zoomPresented = false
+    @State private var searchPresented = false
 
     var body: some View {
         NavigationSplitView {
@@ -18,7 +21,7 @@ struct RootView: View {
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .topTrailing) {
-                        if showSuggestions {
+                        if showSuggestions && !searchPresented {
                             SearchSuggestionPanel(model: model) {
                                 suggestionsPinned = false
                                 searchFocused = false
@@ -35,6 +38,13 @@ struct RootView: View {
             }
             .navigationTitle("")
             .toolbar { toolbarContent }
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { windowWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in windowWidth = width }
+            }
         }
         .navigationSplitViewStyle(.balanced)
         .tint(Palette.accentColor)
@@ -63,6 +73,7 @@ struct RootView: View {
             if model.browse == .places, model.viewerAssetID == nil, !model.isSearching {
                 placeFocused = true
             } else {
+                if windowWidth < 1100 { searchPresented = true }
                 searchFocused = true
                 if !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     suggestionsPinned = true
@@ -70,6 +81,7 @@ struct RootView: View {
             }
         }
         .onChange(of: model.suggestionEpoch) { _, _ in
+            searchPresented = false
             suggestionsPinned = false
             searchFocused = false
         }
@@ -130,11 +142,18 @@ struct RootView: View {
     private var toolbarContent: some ToolbarContent {
         navigationTools
         principalTools
-        actionTools
+        if !model.hiddenLockPresented {
+            actionTools
+        }
     }
 
     @ToolbarContentBuilder
     private var navigationTools: some ToolbarContent {
+        if model.viewerAssetID != nil {
+            ToolbarItem(placement: .navigation) {
+                backButton("Back to \(model.filterTitle)") { model.closeViewer() }
+            }
+        }
         ToolbarItem(placement: .navigation) {
             titleStack
         }
@@ -159,8 +178,21 @@ struct RootView: View {
                     .foregroundStyle(Palette.secondaryColor)
             }
         } else if model.showsTimelinePicker {
-            ToolbarItem(placement: .principal) {
-                TimelinePicker(scale: $model.timelineScale)
+            ToolbarItem(placement: .primaryAction) {
+                if windowWidth >= 1200 {
+                    TimelinePicker(scale: $model.timelineScale)
+                } else {
+                    Picker("Timeline", selection: $model.timelineScale) {
+                        Text("Years").tag(TimelineScale.years)
+                        Text("Months").tag(TimelineScale.months)
+                        Text("Days").tag(TimelineScale.days)
+                        Text("All Photos").tag(TimelineScale.all)
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(width: 96)
+                    .help("Group photos by date")
+                }
             }
         }
     }
@@ -204,26 +236,69 @@ struct RootView: View {
                 placesTools
             }
         }
-        ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 10) {
-                if model.showsZoom {
+        ToolbarItemGroup(placement: .primaryAction) {
+            if model.showsZoom {
+                if windowWidth >= 1200 {
                     zoomSlider
-                }
-                if showsInspectorButton {
+                } else {
                     Button {
-                        model.inspectorVisible.toggle()
+                        zoomPresented.toggle()
                     } label: {
-                        Image(systemName: model.viewerAssetID == nil ? "sidebar.trailing" : "info.circle.fill")
+                        Image(systemName: "square.grid.2x2")
+                            .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.borderless)
-                    .help(model.inspectorVisible ? "Hide Info" : "Show Info")
-                    .foregroundStyle(model.inspectorVisible && model.viewerAssetID != nil ? Palette.accentColor : Palette.inkColor)
+                    .help("Thumbnail size")
+                    .accessibilityLabel("Thumbnail size")
+                    .popover(isPresented: $zoomPresented) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Thumbnail size").font(StillroomFont.controlMedium)
+                            zoomSlider
+                        }
+                        .padding(16)
+                    }
                 }
-                if model.browse == .places, model.viewerAssetID == nil, !model.isSearching {
-                    placeSearch
-                } else {
-                    librarySearch
+            }
+            if showsInspectorButton {
+                Button {
+                    model.inspectorVisible.toggle()
+                } label: {
+                    Image(systemName: model.viewerAssetID == nil ? "sidebar.trailing" : "info.circle")
+                        .frame(width: 28, height: 28)
                 }
+                .buttonStyle(.borderless)
+                .help(model.inspectorVisible ? "Hide Info" : "Show Info")
+                .accessibilityLabel(model.inspectorVisible ? "Hide Info" : "Show Info")
+                .foregroundStyle(model.inspectorVisible ? Palette.accentColor : Palette.secondaryColor)
+            }
+            if model.browse == .places, model.viewerAssetID == nil, !model.isSearching {
+                placeSearch
+            } else if windowWidth < 1100 {
+                Button {
+                    searchPresented.toggle()
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(model.isSearching ? Palette.accentColor : Palette.secondaryColor)
+                }
+                .help("Search library (⌘F)")
+                .accessibilityLabel("Search library")
+                .popover(isPresented: $searchPresented) {
+                    VStack(spacing: 8) {
+                        librarySearch
+                        if showSuggestions {
+                            SearchSuggestionPanel(model: model) {
+                                suggestionsPinned = false
+                                searchPresented = false
+                                searchFocused = false
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .onAppear { searchFocused = true }
+                }
+            } else {
+                librarySearch
             }
         }
     }
@@ -235,7 +310,7 @@ struct RootView: View {
 
     private var showsInspectorButton: Bool {
         if model.hiddenLockPresented { return false }
-        if model.isSearching { return false }
+        if model.isSearching { return true }
         switch model.browse {
         case .places, .highlights:
             return model.viewerAssetID != nil
@@ -247,19 +322,24 @@ struct RootView: View {
     }
 
     private var titleStack: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(model.filterTitle)
-                .font(model.usesLargeTitle ? StillroomFont.title : StillroomFont.section)
-                .foregroundStyle(Palette.inkColor)
-                .lineLimit(1)
-            if model.usesLargeTitle, !model.librarySubtitle.isEmpty {
-                Text(model.librarySubtitle)
-                    .font(StillroomFont.metadata)
-                    .foregroundStyle(Palette.secondaryColor)
+        HStack(spacing: 10) {
+            AppMark(size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.filterTitle)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Palette.inkColor)
                     .lineLimit(1)
+                if model.usesLargeTitle, !model.librarySubtitle.isEmpty {
+                    Text(model.librarySubtitle)
+                        .font(StillroomFont.caption)
+                        .foregroundStyle(Palette.secondaryColor)
+                        .lineLimit(1)
+                }
             }
         }
-        .padding(.vertical, model.usesLargeTitle ? 2 : 0)
+        .frame(width: windowWidth >= 1200 ? 220 : 168, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.vertical, 4)
     }
 
     private func backButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -277,6 +357,7 @@ struct RootView: View {
             Image(systemName: "photo")
                 .font(.system(size: 11))
             Slider(value: $model.thumbnailSide, in: 80...320)
+                .accessibilityLabel("Thumbnail size")
                 .frame(width: 92)
                 .controlSize(.small)
                 .tint(Palette.accentColor)
@@ -293,37 +374,58 @@ struct RootView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.secondaryColor)
             if !model.searchTokens.isEmpty {
-                ForEach(model.searchTokens) { token in
+                ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
-                        Text(token.value)
-                            .lineLimit(1)
-                        Button {
-                            model.searchTokens.removeAll { $0.id == token.id }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8, weight: .bold))
+                        ForEach(model.searchTokens) { token in
+                            HStack(spacing: 4) {
+                                Text(token.value)
+                                    .lineLimit(1)
+                                Button {
+                                    model.searchTokens.removeAll { $0.id == token.id }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .font(StillroomFont.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Palette.accentColor.opacity(0.14), in: Capsule())
+                            .foregroundStyle(Palette.inkColor)
                         }
-                        .buttonStyle(.plain)
                     }
-                    .font(StillroomFont.caption)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Palette.accentColor.opacity(0.14), in: Capsule())
-                    .foregroundStyle(Palette.inkColor)
                 }
+                .frame(maxWidth: 110)
             }
             TextField("Search", text: $model.searchText)
                 .textFieldStyle(.plain)
                 .font(StillroomFont.control)
                 .focused($searchFocused)
-                .frame(minWidth: 88)
+                .accessibilityLabel("Search library")
+                .frame(minWidth: 60)
+                .onExitCommand {
+                    suggestionsPinned = false
+                    searchFocused = false
+                }
                 .onSubmit {
                     suggestionsPinned = false
+                    searchPresented = false
                 }
+            if model.isSearching {
+                Button {
+                    model.clearSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Palette.secondaryColor)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityLabel("Clear search")
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .frame(width: model.searchTokens.isEmpty ? 196 : 280)
+        .padding(.horizontal, 10)
+        .frame(width: model.searchTokens.isEmpty ? (windowWidth < 1100 ? 300 : 220) : 300, height: 30)
         .background(Palette.raisedColor, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -391,6 +493,16 @@ struct RootView: View {
 
     private func viewerTools(_ asset: Asset) -> some View {
         HStack(spacing: 8) {
+            if asset.mediaKind == .video || asset.mediaKind == .screenRecording {
+                Button {
+                    if asset.filePath != nil { model.quickLookSelection() }
+                    else { model.openPhotosApp() }
+                } label: {
+                    Label(asset.filePath == nil ? "Open in Photos" : "Play Video", systemImage: "play.fill")
+                }
+                .help(asset.filePath == nil ? "Open in Photos" : "Play Video")
+                .accessibilityLabel(asset.filePath == nil ? "Open in Photos" : "Play Video")
+            }
             Button {
                 let targets = model.selectedAssets.contains(where: { $0.id == asset.id }) ? model.selectedAssets : [asset]
                 model.setFavorite(!asset.isFavorite, assets: targets)
@@ -400,6 +512,7 @@ struct RootView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(asset.isFavorite ? Palette.accentColor : Palette.inkColor)
             .help(asset.isFavorite ? "Remove from Favorites" : "Favorite")
+            .accessibilityLabel(asset.isFavorite ? "Remove from Favorites" : "Favorite")
             Button {
                 model.share(asset)
             } label: {
@@ -408,6 +521,7 @@ struct RootView: View {
             .buttonStyle(.borderless)
             .disabled(asset.filePath == nil)
             .help("Share")
+            .accessibilityLabel("Share photo")
             Text("Fit")
                 .font(StillroomFont.controlMedium)
                 .foregroundStyle(Palette.inkColor)
@@ -449,37 +563,25 @@ struct TimelinePicker: View {
     var choose: ((Bool) -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 2) {
+        Group {
             if let scale {
-                segment("Years", on: scale.wrappedValue == .years) { scale.wrappedValue = .years }
-                segment("Months", on: scale.wrappedValue == .months) { scale.wrappedValue = .months }
-                segment("Days", on: scale.wrappedValue == .days) { scale.wrappedValue = .days }
-                segment("All", on: scale.wrappedValue == .all) { scale.wrappedValue = .all }
+                Picker("Timeline", selection: scale) {
+                    Text("Years").tag(TimelineScale.years)
+                    Text("Months").tag(TimelineScale.months)
+                    Text("Days").tag(TimelineScale.days)
+                    Text("All").tag(TimelineScale.all)
+                }
             } else if let labels, let selected, let choose {
-                ForEach(labels, id: \.0) { label in
-                    segment(label.0, on: selected == label.1) { choose(label.1) }
+                Picker("Map style", selection: Binding(get: { selected }, set: choose)) {
+                    ForEach(labels, id: \.0) { label in
+                        Text(label.0).tag(label.1)
+                    }
                 }
             }
         }
-        .padding(3)
-        .background(Palette.inkColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    private func segment(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(StillroomFont.controlMedium)
-                .foregroundStyle(on ? Color.white : Palette.inkColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
-                .background {
-                    if on {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Palette.accentColor)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 }
 
@@ -488,35 +590,38 @@ private struct SearchSuggestionPanel: View {
     var dismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Search your library")
-                .font(StillroomFont.section)
-                .foregroundStyle(Palette.inkColor)
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-            suggestionRow(
-                title: "Search for “\(model.searchText.trimmingCharacters(in: .whitespacesAndNewlines))”",
-                subtitle: nil,
-                systemImage: "magnifyingglass",
-                highlighted: true
-            ) {
-                dismiss()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Search your library")
+                    .font(StillroomFont.section)
+                    .foregroundStyle(Palette.inkColor)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                suggestionRow(
+                    title: "Search for “\(model.searchText.trimmingCharacters(in: .whitespacesAndNewlines))”",
+                    subtitle: nil,
+                    systemImage: "magnifyingglass",
+                    highlighted: true
+                ) {
+                    dismiss()
+                }
+                grouped("People", tokens: model.searchSuggestions.filter { $0.kind == .person })
+                grouped("Places", tokens: model.searchSuggestions.filter { $0.kind == .place })
+                grouped("Dates", tokens: model.searchSuggestions.filter { $0.kind == .date })
+                grouped("Text", tokens: model.searchSuggestions.filter { $0.kind == .text })
+                Divider().padding(.top, 6)
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("Search stays on this Mac", systemImage: "lock")
+                    Text("Try a description, like dogs at the beach")
+                }
+                .font(StillroomFont.caption)
+                .foregroundStyle(Palette.secondaryColor)
+                .padding(12)
             }
-            grouped("People", tokens: model.searchSuggestions.filter { $0.kind == .person })
-            grouped("Places", tokens: model.searchSuggestions.filter { $0.kind == .place })
-            grouped("Dates", tokens: model.searchSuggestions.filter { $0.kind == .date })
-            grouped("Text", tokens: model.searchSuggestions.filter { $0.kind == .text })
-            Divider().padding(.top, 6)
-            VStack(alignment: .leading, spacing: 3) {
-                Label("Search stays on this Mac", systemImage: "lock")
-                Text("Try a description, like dogs at the beach")
-            }
-            .font(StillroomFont.caption)
-            .foregroundStyle(Palette.secondaryColor)
-            .padding(12)
         }
         .frame(width: 340)
+        .frame(maxHeight: 430)
         .background(Palette.raisedColor)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {

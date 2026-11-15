@@ -184,8 +184,10 @@ final class PDFSession {
         panel.canChooseDirectories = false
         panel.prompt = "Add"
         panel.message = "The PDF is a new file. Originals are not changed."
-        guard panel.runModal() == .OK else { return }
-        addURLs(panel.urls)
+        panel.begin { [weak self] response in
+            guard response == .OK else { return }
+            self?.addURLs(panel.urls)
+        }
     }
 
     func chooseFolder() {
@@ -195,10 +197,12 @@ final class PDFSession {
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
         panel.message = "The PDF is written here. Originals are not changed."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        _ = url.startAccessingSecurityScopedResource()
-        folderPath = url.path
-        besideOriginal = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            _ = url.startAccessingSecurityScopedResource()
+            self?.folderPath = url.path
+            self?.besideOriginal = false
+        }
     }
 
     func start() {
@@ -409,7 +413,8 @@ struct PDFPanel: View {
                     .frame(width: 280)
             }
             if !session.queue.items.isEmpty {
-                progress
+                ScrollView { progress }
+                    .frame(maxHeight: 90)
             }
             HStack {
                 Spacer()
@@ -464,6 +469,9 @@ struct PDFPanel: View {
                 }
         }
         .buttonStyle(.plain)
+        .disabled(session.running)
+        .accessibilityLabel(mode.title)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var previewColumn: some View {
@@ -526,6 +534,8 @@ struct PDFPanel: View {
                         .disabled(session.running)
                 }
             }
+            .frame(height: session.pages.isEmpty ? 30 : 94)
+            .disabled(session.running)
             HStack {
                 Text("\(Format.countPhrase(session.pages.count, singular: "page", plural: "pages")) · Original files stay untouched.")
                     .font(StillroomFont.caption)
@@ -743,15 +753,20 @@ private struct PDFPageThumb: View {
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            Palette.borderColor.opacity(0.25)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
+        GeometryReader { geometry in
+            ZStack {
+                Palette.borderColor.opacity(0.25)
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
         .task(id: url?.path) {
+            image = nil
             guard let url else { return }
             image = NSImage(contentsOf: url)
         }

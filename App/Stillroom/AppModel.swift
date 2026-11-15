@@ -56,6 +56,8 @@ final class AppModel {
     private(set) var recentCount = 0
     private(set) var knownPlaces: [String] = []
     private(set) var scanProgress: ScanProgress?
+    var resultScope: SearchResultScope = .all
+    var resultOrder: SearchResultOrder = .relevance
     var searchTokens: [LibrarySearchToken] = []
     var viewerAssetID: String?
     var highlightedSubjectID: String?
@@ -190,7 +192,7 @@ final class AppModel {
     }
 
     var showsTimelinePicker: Bool {
-        if hiddenLockPresented { return true }
+        if hiddenLockPresented { return false }
         if isSearching || viewerAssetID != nil { return false }
         switch browse {
         case .library, .favorites, .recents, .hidden:
@@ -201,14 +203,14 @@ final class AppModel {
     }
 
     var showsZoom: Bool {
-        if hiddenLockPresented { return true }
+        if hiddenLockPresented { return false }
         if isSearching || viewerAssetID != nil { return false }
         switch browse {
-        case .library, .favorites, .recents, .hidden, .duplicates:
+        case .library, .favorites, .recents, .hidden:
             return true
         case .people:
             return selectedSubjectID != nil
-        case .places, .highlights:
+        case .places, .highlights, .duplicates:
             return false
         }
     }
@@ -467,6 +469,8 @@ final class AppModel {
     }
 
     func selectHidden() {
+        closeViewer()
+        replaceSelection([], focused: nil)
         if hiddenUnlocked {
             hiddenLockPresented = false
             hiddenPromptVisible = false
@@ -488,6 +492,7 @@ final class AppModel {
         Task {
             let ok = await HiddenAuthentication.unlock()
             authenticatingHidden = false
+            guard hiddenLockPresented else { return }
             if ok {
                 hiddenUnlocked = true
                 hiddenLockPresented = false
@@ -584,6 +589,11 @@ final class AppModel {
         hiddenLockPresented = false
         hiddenPromptVisible = false
         guard browse == .hidden else { return }
+        closeViewer()
+        replaceSelection([], focused: nil)
+        assets = []
+        gridBlocks = nil
+        inspectorVisible = false
         browse = .library
         selectedSourceID = nil
         selectedKind = nil
@@ -784,7 +794,13 @@ final class AppModel {
         panel.prompt = "Add Folder"
         panel.message = "Stillroom only reads this folder. Nothing is moved or changed."
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            self.addSelectedFolder(url, database: database)
+        }
+    }
+
+    private func addSelectedFolder(_ url: URL, database: IndexDatabase) {
         let path = SourceCatalog.normalizedDirectory(url).path
         if sources.contains(where: { $0.kind == .folder && $0.rootPath == path }) {
             status = "That folder is already a source."
@@ -1335,6 +1351,9 @@ final class AppModel {
     }
 
     func applySidebar(_ selection: SidebarSelection) {
+        closeViewer()
+        clearSearch()
+        replaceSelection([], focused: nil)
         switch selection {
         case .all:
             selectAll()
@@ -1365,6 +1384,18 @@ final class AppModel {
             selectedSourceID = id
             reload()
         }
+    }
+
+    func clearSearch() {
+        searchText = ""
+        searchTokens = []
+        resultScope = .all
+        resultOrder = .relevance
+        suggestionEpoch += 1
+    }
+
+    var orderedSearchResults: [Asset] {
+        SearchResultPresentation.assets(assets, scope: resultScope, order: resultOrder)
     }
 
     func addSearchToken(_ token: LibrarySearchToken) {
@@ -1412,7 +1443,8 @@ final class AppModel {
 
     func visibleSections() -> [TimelineSection] {
         if isSearching {
-            return assets.isEmpty ? [] : [TimelineSection(id: "results", title: "", place: nil, assets: assets)]
+            let results = orderedSearchResults
+            return results.isEmpty ? [] : [TimelineSection(id: "results", title: "", place: nil, assets: results)]
         }
         if browse == .duplicates, let gridBlocks {
             return gridBlocks.map { TimelineSection(id: $0.id, title: $0.title, place: nil, assets: $0.assets) }
@@ -1468,8 +1500,8 @@ final class AppModel {
     func moveSelection(delta: Int) {
         let flat = flatAssets()
         guard !flat.isEmpty else { return }
-        let current = selectedAssetID.flatMap { id in flat.firstIndex(where: { $0.id == id }) } ?? 0
-        let nextIndex = min(max(0, current + delta), flat.count - 1)
+        let current = selectedAssetID.flatMap { id in flat.firstIndex(where: { $0.id == id }) }
+        let nextIndex = current.map { min(max(0, $0 + delta), flat.count - 1) } ?? (delta < 0 ? flat.count - 1 : 0)
         let asset = flat[nextIndex]
         replaceSelection([asset], focused: asset)
         selectionAnchorID = asset.id
@@ -1480,9 +1512,8 @@ final class AppModel {
     }
 
     func openViewer(_ asset: Asset) {
-        if !selectedAssets.contains(where: { $0.id == asset.id }) {
-            replaceSelection([asset], focused: asset)
-        }
+        replaceSelection([asset], focused: asset)
+        selectionAnchorID = asset.id
         if inspectorBeforeViewer == nil {
             inspectorBeforeViewer = inspectorVisible
         }
