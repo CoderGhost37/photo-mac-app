@@ -1405,6 +1405,21 @@ final class AppModel {
         searchText = ""
     }
 
+    func screenshotSaved(_ url: URL) {
+        guard let database, !ScreenshotSession.isEnabled else { return }
+        do {
+            let home = StillroomPreferences.home
+            sources = try database.synchronizeBuiltinSources(
+                homeDirectory: home,
+                captureDirectory: ScreenshotLocation.current(home: home)
+            )
+            restartWatcher()
+            handleFileEvent(url.standardizedFileURL.path)
+        } catch {
+            status = "Screenshot saved, but the library could not refresh: \(error.localizedDescription)"
+        }
+    }
+
     func rescan() {
         let enabled = sources.filter(\.enabled)
         guard !enabled.isEmpty else {

@@ -4,6 +4,8 @@ Stillroom is a native Mac app that shows photos, videos, screenshots, and screen
 
 This version is the library, local conversion and PDF tools, search, a place map, people and pets, highlights, duplicate groups, a locked Hidden album, iPhone import, and WebP export. It reads files in place, and when you convert, export, or import from a device it writes a new file. Search reads text on the Mac and, if you install the description model, ranks pictures by that description. Faces, pets, labels, and duplicate prints are computed on the Mac. Nothing is uploaded.
 
+Optional Screenshot Actions add a floating preview after macOS saves a new screenshot, with Copy, Annotate, Save a Copy, and dragging into other apps. The editor saves new PNGs with crop, arrows, text, and solid redaction.
+
 ## What it indexes
 
 - Screenshots, from the folder in `com.apple.screencapture` (`location`). If that preference is unset, it uses `~/Desktop`.
@@ -77,6 +79,24 @@ swift test
 On Linux, install a Swift 6.1+ toolchain and `libsqlite3-dev` first. Apple-only code (PhotoKit, AppKit, ImageIO, AVFoundation, Vision, Core ML, FSEvents, ImageCaptureCore, LocalAuthentication, IOKit) is compiled only where those frameworks exist. WebP encoding uses libwebp and is tested on Linux.
 
 GitHub Actions, on `macos-latest` for branch pushes and pull requests, runs `swift test` and `xcodebuild -project Stillroom.xcodeproj -scheme Stillroom -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build`, then a Release build. It ad-hoc signs that app, zips it with `ditto -c -k --keepParent`, and uploads `Stillroom.zip`. A push to `main` also publishes a GitHub Release tagged `build-<run number>` with the zip attached. Pull requests do not publish a release. See `.github/workflows/macos.yml`.
+
+## Screenshot Actions
+
+Choose **Screenshots → Enable Screenshot Actions**. This is off by default and remembered between launches. While enabled, a camera icon in the menu bar offers capture and recent screenshots even after you close the library window. Stillroom must remain running.
+
+Use your usual macOS screenshot shortcuts, or choose **Take Screenshot…** to open Apple's Screenshot app. Stillroom leaves your shortcuts, capture settings, and floating thumbnail preference unchanged. After macOS finishes saving a new screenshot in its configured screenshot folder, Stillroom shows a small panel without taking focus from your current app. If the native thumbnail is enabled, the panel may appear after that thumbnail disappears. Screenshots sent only to the clipboard, PDF captures, and screen recordings do not open the panel.
+
+- **Copy** places the image on the clipboard. The saved file stays on disk.
+- **Annotate** opens crop, arrow, text, and solid black redaction tools. Use Select to move annotations or resize them with their handles. The inspector edits text, color, and size or deletes the selected annotation. Undo and Redo restore edits, including crop and background changes. Copy Image and Save a Copy include the current edits, crop, and optional solid or gradient background with padding, rounded corners, and shadow. The export preview shows the final dimensions. Redacted areas become opaque black pixels in the exported image. The original remains unchanged. Closing an editor or quitting asks before discarding unsaved edits.
+- **Copy Text** reads the selected screenshot on this Mac and copies recognized text in reading order. An empty result leaves the clipboard unchanged. Selecting another capture, dismissing the panel, or disabling Screenshot Actions cancels the pending copy.
+- **Save a Copy** duplicates the original screenshot under a new name. Existing files are never replaced. The editor allocates a numbered name if its requested output name is occupied.
+- Drag the preview into another app to share the original saved file. Use **Recent** to switch between up to 20 captures from this session. Dismissing the panel never deletes a screenshot.
+
+Saved files in enabled library sources are indexed and become searchable normally. Saving into another folder does not automatically add that entire folder to the library; use Add Folder if desired. Changing the native screenshot location is picked up while Screenshot Actions is enabled. Existing files are not presented as new captures, and disabling the feature stops monitoring. It recognizes macOS screenshot metadata, so it does not treat every new image as a screenshot or intercept another capture tool's workflow.
+
+Choose **Screenshots → Open Screenshot…** to edit an existing image. **Scrolling Capture…** selects one region on one display, then captures that same region each time you press Capture Next Frame. Scroll the target app down manually between captures and keep at least 25% of the previous frame visible. Exclude fixed headers, scroll bars, and moving content. Screen capture requires macOS Screen Recording access. Stillroom does not scroll other apps for you.
+
+You can also import equal-sized overlapping frames in filename order. Stillroom rejects duplicate frames, uncertain overlaps, mismatched dimensions, and captures beyond 30,000 pixels tall or its 40-million-pixel limit. Rejected frames leave accepted frames available. Finish & Save creates a new stitched PNG and opens it for annotation. Cancel removes temporary frames. Existing output files are never replaced.
 
 ## Convert and PDF
 
