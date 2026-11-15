@@ -116,8 +116,10 @@ final class DeviceImportSession: NSObject {
         panel.canCreateDirectories = true
         panel.prompt = "Import Here"
         panel.message = "New files are copied into YYYY/MM folders. Existing files are not replaced or deleted."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        folderPath = SourceCatalog.normalizedDirectory(url).path
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.folderPath = SourceCatalog.normalizedDirectory(url).path
+        }
     }
 
     func select(_ id: String) {

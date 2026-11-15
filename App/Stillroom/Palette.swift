@@ -46,15 +46,20 @@ enum StillroomFont {
 struct AppMark: View {
     var size: CGFloat = 64
 
+    private static let artwork: NSImage = {
+        if let image = NSImage(named: "BrandMark") { return image }
+        if let url = Bundle.main.url(forResource: "BrandMark", withExtension: "png"),
+           let image = NSImage(contentsOf: url) { return image }
+        return NSImage()
+    }()
+
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-            .fill(Palette.markGradient)
+        Image(nsImage: Self.artwork)
+            .renderingMode(.original)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
             .frame(width: size, height: size)
-            .overlay {
-                Text("S")
-                    .font(.system(size: size * 0.48, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
             .accessibilityLabel("Stillroom")
     }
 }

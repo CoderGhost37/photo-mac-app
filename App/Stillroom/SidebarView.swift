@@ -32,6 +32,8 @@ struct SidebarView: View {
                         model.openConvert()
                     } label: {
                         Label("Convert", systemImage: "arrow.triangle.2.circlepath")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Convert selected files, or drop files in the panel")
@@ -39,6 +41,8 @@ struct SidebarView: View {
                         model.openPDF()
                     } label: {
                         Label("Make PDF", systemImage: "doc.richtext")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Make a PDF from the selection, or drop files in the panel")
@@ -68,12 +72,16 @@ struct SidebarView: View {
                         model.addFolder()
                     } label: {
                         Label("Add Folder…", systemImage: "folder.badge.plus")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     Button {
                         model.openImport()
                     } label: {
                         Label("Import from iPhone…", systemImage: "iphone")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Copy photos from a connected iPhone. Originals on the device stay put.")
@@ -91,17 +99,7 @@ struct SidebarView: View {
                 .padding(.bottom, 10)
         }
         .background(Palette.sidebarColor)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                HStack(spacing: 6) {
-                    AppMark(size: 18)
-                    Text("Stillroom")
-                        .font(StillroomFont.controlMedium)
-                        .foregroundStyle(Palette.inkColor)
-                }
-                .padding(.trailing, 18)
-            }
-        }
+
     }
 
     private func row(

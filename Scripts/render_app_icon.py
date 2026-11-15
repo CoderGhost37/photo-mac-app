@@ -597,6 +597,9 @@ def main():
         validate_png(destination, size, letter_xy)
         print(f"wrote {destination}")
 
+    brandmark = os.path.join(os.path.dirname(ICONSET), "BrandMark.imageset", "BrandMark.png")
+    shutil.copyfile(os.path.join(ICONSET, "icon_1024.png"), brandmark)
+
     shutil.copyfile(os.path.join(ICONSET, "icon_1024.png"), os.path.join(DOCS, "app-icon-1024.png"))
     shutil.copyfile(os.path.join(ICONSET, "icon_128.png"), os.path.join(DOCS, "app-icon-128.png"))
     print("wrote docs/app-icon-1024.png and docs/app-icon-128.png")

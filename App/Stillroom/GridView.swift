@@ -11,8 +11,6 @@ struct GridView: View {
     var model: AppModel
     var namespace: Namespace.ID
     @FocusState private var focused: Bool
-    @State private var resultScope: ResultScope = .all
-    @State private var resultOrder: ResultOrder = .relevance
 
     var body: some View {
         content
@@ -219,7 +217,7 @@ struct GridView: View {
     }
 
     private var searchResults: some View {
-        let assets = orderedResults
+        let assets = model.orderedSearchResults
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(model.combinedSearchText)
@@ -236,11 +234,11 @@ struct GridView: View {
                         .font(StillroomFont.caption)
                         .foregroundStyle(Palette.secondaryColor)
                     Menu {
-                        Button("Relevance") { resultOrder = .relevance }
-                        Button("Newest") { resultOrder = .newest }
-                        Button("Oldest") { resultOrder = .oldest }
+                        Button("Relevance") { model.resultOrder = .relevance }
+                        Button("Newest") { model.resultOrder = .newest }
+                        Button("Oldest") { model.resultOrder = .oldest }
                     } label: {
-                        Text("Sort: \(resultOrder.title)")
+                        Text("Sort: \(model.resultOrder.title)")
                             .font(StillroomFont.control)
                     }
                     .menuStyle(.borderlessButton)
@@ -251,12 +249,16 @@ struct GridView: View {
             .padding(.top, 8)
             .padding(.bottom, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            GeometryReader { geo in
-                ScrollView {
-                    photoGrid(assets, width: gridWidth(geo.size.width), captions: true)
-                        .padding(.horizontal, Metrics.pageInset)
-                        .padding(.bottom, 12)
+            if assets.isEmpty {
+                ContentUnavailableView {
+                    Label("No results in this media type", systemImage: "magnifyingglass")
+                } description: {
+                    Text("Choose All to see the other matches for this search.")
+                } actions: {
+                    Button("Show All Results") { model.resultScope = .all }
                 }
+            } else {
+                photoScroll(captions: true)
             }
             Text("Results found privately on the Mac")
                 .font(StillroomFont.caption)
@@ -268,7 +270,7 @@ struct GridView: View {
 
     private var resultScopes: some View {
         HStack(spacing: 2) {
-            scopeButton("All Photos", .all)
+            scopeButton("All", .all)
             scopeButton("Photos", .photos)
             scopeButton("Videos", .videos)
         }
@@ -276,10 +278,10 @@ struct GridView: View {
         .background(Palette.inkColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func scopeButton(_ title: String, _ scope: ResultScope) -> some View {
-        let on = resultScope == scope
+    private func scopeButton(_ title: String, _ scope: SearchResultScope) -> some View {
+        let on = model.resultScope == scope
         return Button {
-            resultScope = scope
+            model.resultScope = scope
         } label: {
             Text(title)
                 .font(StillroomFont.controlMedium)
@@ -294,26 +296,6 @@ struct GridView: View {
                 }
         }
         .buttonStyle(.plain)
-    }
-
-    private var orderedResults: [Asset] {
-        let filtered: [Asset]
-        switch resultScope {
-        case .all:
-            filtered = model.assets
-        case .photos:
-            filtered = model.assets.filter { $0.mediaKind == .photo || $0.mediaKind == .screenshot }
-        case .videos:
-            filtered = model.assets.filter { $0.mediaKind == .video || $0.mediaKind == .screenRecording }
-        }
-        switch resultOrder {
-        case .relevance:
-            return filtered
-        case .newest:
-            return filtered.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
-        case .oldest:
-            return filtered.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
-        }
     }
 
     private var placesPage: some View {
@@ -615,13 +597,14 @@ struct GridView: View {
                     .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(2)
             }
+            .padding(.trailing, 44)
             .padding(14)
             Button {
                 model.play(story)
             } label: {
                 Image(systemName: "play.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(Palette.inkColor)
+                    .foregroundStyle(Color.black.opacity(0.85))
                     .frame(width: 32, height: 32)
                     .background(.white, in: Circle())
             }
@@ -647,6 +630,9 @@ struct GridView: View {
         }
         if calendar.isDate(start, equalTo: end, toGranularity: .month) {
             return "\(Format.monthYear(start)) · \(count)"
+        }
+        if !calendar.isDate(start, equalTo: end, toGranularity: .year) {
+            return "\(Format.longDay(start)) – \(Format.longDay(end)) · \(count)"
         }
         return "\(Format.shortMonthDay(start))–\(Format.shortMonthDay(end)) · \(count)"
     }
@@ -683,7 +669,7 @@ struct GridView: View {
     private func duplicateGroup(_ block: GridBlock) -> some View {
         let exact = block.id.hasPrefix("exact:")
         let place = TimelineGrouping.dominantPlace(in: block.assets)
-        let name = place ?? Format.fileName(block.assets[0])
+        let name = place ?? block.assets.first.map(Format.fileName) ?? "Duplicates"
         let noun = exact ? (block.assets.count == 1 ? "identical photo" : "identical photos") : (block.assets.count == 1 ? "similar photo" : "similar photos")
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
@@ -696,7 +682,7 @@ struct GridView: View {
                     .font(StillroomFont.caption)
                     .foregroundStyle(Palette.secondaryColor)
             }
-            HStack(alignment: .top, spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 16)], alignment: .leading, spacing: 20) {
                 ForEach(block.assets) { asset in
                     duplicateCard(asset)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -713,10 +699,14 @@ struct GridView: View {
 
     private func duplicateCard(_ asset: Asset) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            AssetThumb(model: model, asset: asset, pointSize: 480)
-                .frame(height: 180)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Button { model.openViewer(asset) } label: {
+                AssetThumb(model: model, asset: asset, pointSize: 480)
+                    .frame(height: 180)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(Format.fileName(asset))")
             Text(Format.fileName(asset))
                 .font(StillroomFont.controlMedium)
                 .foregroundStyle(Palette.inkColor)
@@ -758,6 +748,15 @@ struct GridView: View {
     }
 
     private var firstRun: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                firstRunContent
+                    .frame(minHeight: geometry.size.height)
+            }
+        }
+    }
+
+    private var firstRunContent: some View {
         VStack(spacing: 16) {
             AppMark(size: 76)
             Text("Your photos. Right where they belong.")
@@ -846,39 +845,6 @@ struct GridView: View {
         ZStack {
             Palette.canvasColor.opacity(0.96)
             VStack(spacing: 36) {
-                if model.hiddenPromptVisible {
-                    VStack(spacing: 12) {
-                        Image(systemName: "touchid")
-                            .font(.system(size: 36))
-                            .foregroundStyle(Color(red: 0.93, green: 0.33, blue: 0.42))
-                        Text("Unlock Hidden")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Palette.inkColor)
-                        Text("Stillroom wants to use Touch ID to unlock the Hidden album.")
-                            .font(StillroomFont.metadata)
-                            .foregroundStyle(Palette.secondaryColor)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 280)
-                        Text("Place your finger on Touch ID.")
-                            .font(StillroomFont.metadata)
-                            .foregroundStyle(Palette.secondaryColor)
-                        HStack(spacing: 10) {
-                            Button("Cancel") { model.dismissHiddenPrompt() }
-                                .buttonStyle(.bordered)
-                            Button("Use Password…") { model.unlockHidden() }
-                                .buttonStyle(.bordered)
-                        }
-                        .padding(.top, 4)
-                    }
-                    .padding(22)
-                    .frame(width: 360)
-                    .background(Palette.raisedColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Palette.borderColor)
-                    }
-                    .shadow(color: .black.opacity(0.12), radius: 24, y: 10)
-                }
                 VStack(spacing: 8) {
                     Image(systemName: "lock")
                         .font(.system(size: 28))
@@ -886,9 +852,12 @@ struct GridView: View {
                     Text("Hidden is locked")
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Palette.inkColor)
-                    Text("Use Touch ID to view your hidden photos.")
+                    Text("Unlock with Touch ID or your Mac password.")
                         .font(StillroomFont.metadata)
                         .foregroundStyle(Palette.secondaryColor)
+                    if model.authenticatingHidden {
+                        ProgressView("Waiting for authentication…")
+                    }
                     Button("Unlock") { model.unlockHidden() }
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accentColor)
@@ -950,26 +919,6 @@ struct GridView: View {
             return "Photos from the last 30 days show up here."
         case .library:
             return "Try another media type or source. The files themselves are unchanged."
-        }
-    }
-}
-
-private enum ResultScope {
-    case all
-    case photos
-    case videos
-}
-
-private enum ResultOrder {
-    case relevance
-    case newest
-    case oldest
-
-    var title: String {
-        switch self {
-        case .relevance: return "Relevance"
-        case .newest: return "Newest"
-        case .oldest: return "Oldest"
         }
     }
 }
@@ -1092,17 +1041,23 @@ struct AssetThumb: View {
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            Palette.borderColor.opacity(0.35)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
+        GeometryReader { geometry in
+            ZStack {
+                Palette.borderColor.opacity(0.35)
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
-        .clipped()
-        .task(id: asset.id) {
-            image = await model.thumbnails?.image(for: asset, pointSize: pointSize, scale: 2, quality: .grid)
+        .task(id: "\(asset.id)|\(asset.contentHash ?? "")|\(asset.fileMTime?.timeIntervalSince1970 ?? 0)|\(pointSize)") {
+            image = nil
+            let loaded = await model.thumbnails?.image(for: asset, pointSize: pointSize, scale: 2, quality: .grid)
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
     }
 }
@@ -1113,18 +1068,24 @@ private struct MemoryCover: View {
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            Palette.markGradient
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
+        GeometryReader { geometry in
+            ZStack {
+                Palette.markGradient
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
         .task(id: assetID) {
             image = nil
             guard let assetID, let asset = model.asset(id: assetID) else { return }
-            image = await model.thumbnails?.image(for: asset, pointSize: 640, scale: 2, quality: .preview)
+            let loaded = await model.thumbnails?.image(for: asset, pointSize: 640, scale: 2, quality: .preview)
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
     }
 }
@@ -1155,30 +1116,40 @@ struct PhotoViewer: View {
                 }
                 HStack {
                     chevron("chevron.left") { model.moveSelection(delta: -1) }
+                        .disabled(index == 0)
+                        .accessibilityLabel("Previous photo")
                     Spacer()
                     chevron("chevron.right") { model.moveSelection(delta: 1) }
+                        .disabled(index == strip.count - 1)
+                        .accessibilityLabel("Next photo")
                 }
                 .padding(.horizontal, 16)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(strip) { item in
-                        AssetThumb(model: model, asset: item, pointSize: 120)
-                            .frame(width: 72, height: 54)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            .overlay {
-                                if item.id == asset.id {
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .strokeBorder(Palette.accentColor, lineWidth: 2)
-                                }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 8) {
+                        ForEach(strip) { item in
+                            Button { model.openViewer(item) } label: {
+                                AssetThumb(model: model, asset: item, pointSize: 120)
+                                    .frame(width: 72, height: 54)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                    .overlay {
+                                        if item.id == asset.id {
+                                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                                .strokeBorder(Palette.accentColor, lineWidth: 2)
+                                        }
+                                    }
                             }
-                            .onTapGesture {
-                                model.openViewer(item)
-                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(Format.fileName(item))
+                            .id(item.id)
+                        }
                     }
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .frame(height: 62)
+                .onAppear { proxy.scrollTo(asset.id, anchor: .center) }
+                .onChange(of: asset.id) { _, id in proxy.scrollTo(id, anchor: .center) }
             }
             Text("\(index + 1) of \(max(strip.count, 1))")
                 .font(StillroomFont.caption)
@@ -1188,6 +1159,7 @@ struct PhotoViewer: View {
         .background(Palette.canvasColor)
         .focusable()
         .focused($focused)
+        .focusEffectDisabled()
         .onAppear { focused = true }
         .onExitCommand { model.closeViewer() }
         .onKeyPress(.escape) {
@@ -1216,10 +1188,6 @@ struct PhotoViewer: View {
     }
 
     private var neighbors: [Asset] {
-        let sections = model.visibleSections()
-        if let section = sections.first(where: { $0.assets.contains { $0.id == model.viewerAssetID } }) {
-            return section.assets
-        }
         let flat = model.flatAssets()
         return flat.isEmpty ? [asset] : flat
     }

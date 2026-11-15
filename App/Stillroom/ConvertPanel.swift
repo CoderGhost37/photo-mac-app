@@ -123,8 +123,10 @@ final class ConvertSession {
         panel.canChooseDirectories = false
         panel.prompt = "Add"
         panel.message = "Converted files are new copies. Originals are not changed."
-        guard panel.runModal() == .OK else { return }
-        addURLs(panel.urls)
+        panel.begin { [weak self] response in
+            guard response == .OK else { return }
+            self?.addURLs(panel.urls)
+        }
     }
 
     func chooseFolder() {
@@ -134,10 +136,12 @@ final class ConvertSession {
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
         panel.message = "Converted files are written here. Originals are not changed."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        _ = url.startAccessingSecurityScopedResource()
-        folderPath = url.path
-        besideOriginal = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            _ = url.startAccessingSecurityScopedResource()
+            self?.folderPath = url.path
+            self?.besideOriginal = false
+        }
     }
 
     func preview() -> [PlannedConversion] {
@@ -315,17 +319,23 @@ struct ConvertPanel: View {
             .padding(.bottom, 16)
             HStack(alignment: .top, spacing: 16) {
                 VStack(spacing: 10) {
-                    ScrollView {
-                        VStack(spacing: 6) {
-                            ForEach(session.inputs) { file in
-                                convertRow(file)
+                    if session.inputs.isEmpty {
+                        Spacer(minLength: 0)
+                        dropZone
+                        Spacer(minLength: 0)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 6) {
+                                ForEach(session.inputs) { file in
+                                    convertRow(file)
+                                }
                             }
                         }
+                        dropZone
                     }
-                    dropZone
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                VStack(alignment: .leading, spacing: 16) {
+                ScrollView {
                     optionCard
                 }
                 .frame(width: 280)
@@ -337,7 +347,8 @@ struct ConvertPanel: View {
                     .padding(.top, 8)
             }
             if !session.queue.items.isEmpty {
-                progress
+                ScrollView { progress }
+                    .frame(maxHeight: 120)
                     .padding(.top, 8)
             }
             HStack {
@@ -354,7 +365,7 @@ struct ConvertPanel: View {
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
                         .tint(Palette.accentColor)
-                        .disabled(session.inputs.isEmpty || !session.availability(for: session.format).available)
+                        .disabled(!session.preview().contains { $0.skipReason == nil })
                 }
             }
             .padding(.top, 14)
@@ -413,7 +424,7 @@ struct ConvertPanel: View {
             Image(systemName: "arrow.down.circle")
                 .font(.system(size: 18))
                 .foregroundStyle(Palette.secondaryColor)
-            Text(targeted ? "Drop to add" : "Drop more files here")
+            Text(targeted ? "Drop to add" : (session.inputs.isEmpty ? "Drop photos or videos here" : "Drop more files here"))
                 .font(StillroomFont.control)
                 .foregroundStyle(Palette.inkColor)
             Button("Add Files…") { session.chooseFiles() }
@@ -440,11 +451,11 @@ struct ConvertPanel: View {
                     .foregroundStyle(Palette.inkColor)
                 Picker("Output format", selection: $session.format) {
                     ForEach(ConvertFormat.stillTargets) { format in
-                        Text(format.title).tag(format)
+                        Text(format.title).tag(format).disabled(!session.canUse(format))
                     }
                     Divider()
                     ForEach(ConvertFormat.videoTargets) { format in
-                        Text(format.title).tag(format)
+                        Text(format.title).tag(format).disabled(!session.canUse(format))
                     }
                 }
                 .pickerStyle(.menu)
@@ -561,15 +572,20 @@ private struct ConvertThumb: View {
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            Palette.borderColor.opacity(0.4)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
+        GeometryReader { geometry in
+            ZStack {
+                Palette.borderColor.opacity(0.4)
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
         .task(id: path) {
+            image = nil
             guard let path else { return }
             image = NSImage(contentsOf: URL(fileURLWithPath: path))
         }

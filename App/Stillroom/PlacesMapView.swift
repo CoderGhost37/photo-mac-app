@@ -37,6 +37,19 @@ struct PlacesMapView: View {
             fitted = false
             fitIfNeeded()
         }
+        .onChange(of: model.placeQuery) { _, _ in
+            model.placeMemberIDs = nil
+            fitted = false
+            fitIfNeeded()
+        }
+        .overlay {
+            if matchingPoints.isEmpty {
+                ContentUnavailableView.search(text: model.placeQuery)
+                    .background(.regularMaterial)
+                    .frame(maxWidth: 360, maxHeight: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             zoomButtons
                 .padding(16)
@@ -44,18 +57,21 @@ struct PlacesMapView: View {
         }
     }
 
-    private var clusters: [MapCluster] {
-        MapGrid.cluster(model.mapPoints, latitudeSpan: span.latitudeDelta, longitudeSpan: span.longitudeDelta)
+    private var matchingPoints: [GeoPoint] {
+        let query = model.placeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return model.mapPoints }
+        return model.mapPoints.filter { point in
+            guard let asset = model.asset(id: point.id), let place = TimelineGrouping.displayPlace(for: asset) else { return false }
+            return place.localizedCaseInsensitiveContains(query)
+        }
     }
 
     private var visibleClusters: [MapCluster] {
-        let query = model.placeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return clusters }
-        return clusters.filter { placeName(for: $0).localizedCaseInsensitiveContains(query) }
+        MapGrid.cluster(matchingPoints, latitudeSpan: span.latitudeDelta, longitudeSpan: span.longitudeDelta)
     }
 
     private func fitIfNeeded() {
-        guard !fitted, let fittedRegion = MapGrid.fittingSpan(for: model.mapPoints) else { return }
+        guard !fitted, let fittedRegion = MapGrid.fittingSpan(for: matchingPoints) else { return }
         fitted = true
         let next = MKCoordinateSpan(latitudeDelta: fittedRegion.latitudeDelta, longitudeDelta: fittedRegion.longitudeDelta)
         span = next
@@ -206,21 +222,14 @@ struct PlacesMapView: View {
 private struct PlaceThumb: View {
     var model: AppModel
     var assetID: String?
-    @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            Palette.borderColor.opacity(0.4)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
+        Group {
+            if let assetID, let asset = model.asset(id: assetID) {
+                AssetThumb(model: model, asset: asset, pointSize: 180)
+            } else {
+                Palette.borderColor.opacity(0.4)
             }
-        }
-        .task(id: assetID) {
-            image = nil
-            guard let assetID, let asset = model.asset(id: assetID) else { return }
-            image = await model.thumbnails?.image(for: asset, pointSize: 180, scale: 2, quality: .grid)
         }
     }
 }
